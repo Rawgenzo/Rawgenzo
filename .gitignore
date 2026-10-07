@@ -1,0 +1,10 @@
+.build/
+.swiftpm/
+*.xcodeproj/xcuserdata/
+DerivedData/
+developed/
+*.rawgenzo.json
+RAWsample/
+
+build/
+.DS_Store
