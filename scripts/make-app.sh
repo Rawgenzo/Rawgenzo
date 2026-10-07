@@ -11,6 +11,7 @@ PRODUCT="RawgenzoApp"                        # Package.swift の実行ターゲ�
 BUNDLE_ID="io.github.rawgenzo.Rawgenzo"      # 好きな逆ドメイン形式に変えてよい
 VERSION="0.1.0"
 MIN_MACOS="13.0"
+COPYRIGHT="Copyright © 2026 Yukimitsu IZAWA"
 
 cd "$(dirname "$0")/.."
 ROOT="$(pwd)"
@@ -56,6 +57,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>CFBundleDevelopmentRegion</key><string>ja</string>
     <key>LSMinimumSystemVersion</key><string>$MIN_MACOS</string>
     <key>LSApplicationCategoryType</key><string>public.app-category.photography</string>
+    <key>NSHumanReadableCopyright</key><string>$COPYRIGHT</string>
     <key>NSHighResolutionCapable</key><true/>
     <key>NSSupportsAutomaticGraphicsSwitching</key><true/>
     $ICON_KEY

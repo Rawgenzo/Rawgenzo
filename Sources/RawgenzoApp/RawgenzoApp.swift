@@ -16,6 +16,9 @@ struct RawgenzoApp: App {
                 .frame(minWidth: 1100, minHeight: 700)
         }
         .commands {
+            CommandGroup(replacing: .appInfo) {
+                Button("Rawgenzo について") { AboutPanel.show() }
+            }
             CommandGroup(replacing: .newItem) {
                 Button("フォルダを開く…") { model.chooseFolder() }
                     .keyboardShortcut("o")

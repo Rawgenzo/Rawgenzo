@@ -60,6 +60,7 @@ Sources/RAWCore/            現像エンジン。UI 非依存(SwiftUI を import
   Photo.swift               Photo と RAWEngine(アプリ・CLI の窓口)
 Sources/RawgenzoApp/        SwiftUI アプリ
   RawgenzoApp.swift         App、メニュー、AppDelegate
+  AboutPanel.swift          「Rawgenzo について」(作者・公式ページ・ライセンス)
   EditorModel.swift         編集状態・プレビュー描画・書き出しの流れ
   AppConfig.swift           AppConfig と AppConfigStore(~/.Rawgenzo/config.json)
   ContentView.swift         ファイル一覧(サムネイル)・プレビュー・書き出し通知
