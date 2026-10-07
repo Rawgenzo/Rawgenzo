@@ -3,6 +3,10 @@
 Apple Silicon ネイティブの個人用 RAW 現像ソフト。SILKYPIX が Apple Silicon にネイティブ対応しないため自作した。
 対象カメラは当面 **SONY α7S III (ILCE-7SM3) の ARW のみ**。ただし機種を後から増やせる設計にしてある。
 
+2026-10-07 に RAWprocessor から改名し、**Rawgenzo** として公開した(MIT License)。
+ソースは https://github.com/Rawgenzo/Rawgenzo 、公式ページは https://rawgenzo.github.io
+(ローカルでは `../Rawgenzo.github.io` に並べて置いている)。README.md は利用者向けの公開文書として書くこと。
+
 これまでの開発は claude.ai 上の Claude が行った。その環境では macOS のフレームワークが無く **一度もビルドできなかった**ため、
 動作確認はすべてオーナーが手元の Mac で行ってきた。Claude Code ではビルドとテストを自分で回せるので、必ずそうすること。
 

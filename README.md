@@ -1,66 +1,93 @@
 # Rawgenzo
 
-Apple Silicon ネイティブの個人用RAW現像ソフト。まずは SONY α7S III (ILCE-7SM3) の ARW のみ対応。
+Apple Silicon の Mac でネイティブに動く RAW 現像ソフトです。
 
-## 必要なもの
+- 公式ページ: https://rawgenzo.github.io
+- ソースコード: https://github.com/Rawgenzo/Rawgenzo
 
-- macOS 13 以降 (Apple Silicon)
-- Xcode 27 以降 (Swift 6.4)
+## 特徴
 
-## ビルドと確認
+- Apple Silicon ネイティブ。デコードは macOS の Core Image、補正処理の一部は Metal で行う
+- 非破壊編集。現像設定は RAW の隣に `<RAW名>.rawgenzo.json` として保存し、RAW そのものは書き換えない
+- 露出・ホワイトバランス・コントラスト・HDR 風トーン(ハイライト/シャドウ)・彩度
+- シャープネス・ノイズ除去
+- ARW に記録された補正値によるレンズ補正(周辺減光・歪曲・倍率色収差)
+- 傾き補正・クロップ(枠は常に回転後の画像の内側に収まる)
+- ルック(〜風フィルター)。組み込みのほか `.cube`(3D LUT)を追加できる
+- 構図ガイド(三分割・黄金比・白銀比・黄金螺旋など)
+- JPEG / HEIF / 16bit TIFF / HDR HEIF で書き出し。ファイル名はテンプレートで決められる
+- フォルダ単位で一括現像できるコマンドラインツール `rawdev`
+
+## 対応カメラ
+
+現在は **SONY α7S III (ILCE-7SM3) の ARW のみ**です。他の機種のファイルは開けません。
+機種は後から追加できる設計にしてあります(「開発」の節)。
+
+## 動作環境
+
+- Apple Silicon の Mac
+- macOS 13 以降
+- ビルドに Xcode 27 以降 (Swift 6.4)。外部の依存パッケージはありません
+
+## 現状について
+
+開発中のソフトです。設定やサイドカーの形式は互換性に気を付けていますが、変わる可能性があります。
+
+- ビルド済みのアプリは配布していません(Developer ID 署名・公証をしていないため)。ソースからビルドしてください
+- アプリでの一括現像はまだできません(CLI ではできます)
+- HDR で書き出す場合も、プレビューは SDR で表示します
+- 強い HDR 風トーンで、明暗差の大きい輪郭にハローが出ることがあります
+- サムネイルは RAW に埋め込まれた JPEG なので、現像結果を反映しません
+- 周辺減光の補正の強さが実際のレンズと合っているかは、まだ確かめていません
+
+## インストール(ソースからビルド)
 
 ```sh
-cd ~/Dropbox/git/Rawgenzo/Rawgenzo
-swift build
+git clone https://github.com/Rawgenzo/Rawgenzo.git
+cd Rawgenzo
+./scripts/make-app.sh --install
+```
 
-# 1. このMacのCore Imageがα7S IIIに対応しているか
-swift run rawdev check
+リリースビルドして `Rawgenzo.app` を作り、自分の Mac 用の署名(アドホック署名)をして `/Applications` に入れます。
+`--install` を付けなければ `build/Rawgenzo.app` を作るだけです。
 
-# 2. サンプルの読み込みとカメラ判定
-swift run rawdev info RAWsample
+ビルドせずに試すなら:
 
-# 3. 現像して書き出し (RAWsample/developed/ に出力)
-swift run rawdev develop RAWsample --exposure 0.5 --hdr 0.6 --saturation 1.15 --look builtin.film
-swift run rawdev develop RAWsample --aspect 16x9 --angle 1.5 --look builtin.cinema --look-strength 0.7
-swift run rawdev develop RAWsample --hdr-output --format heif-hdr
-
-# 4. 設定ファイルの書き出し設定を確認
-swift run rawdev config
-
-# 5. テスト (サンプルを使うテストも含める)
-RAW_SAMPLE_DIR=RAWsample swift test
-
-# 6. アプリを起動
+```sh
 swift run RawgenzoApp
 ```
 
-Xcodeで開く場合は `Package.swift` をダブルクリックし、スキームで `RawgenzoApp` を選んで実行する。
+## 使い方
 
-## 構成
+1. 「ファイル」→「フォルダを開く…」(⌘O)で ARW の入ったフォルダを開く
+2. 左の一覧から写真を選び、右側の調整パネルで調整する。調整は自動で保存される
+3. 「ファイル」→「書き出し」(⌘E)で書き出す
 
-```
-Sources/RAWCore/            現像エンジン (UI非依存)
-  Camera/                   対応カメラの定義と登録
-    Sony/SonyA7S3Profile    α7S III の判定・初期値
-  Decode/                   RAWデコーダ (現在は Core Image の CIRAWFilter)
-  Pipeline/                 デコード後の処理 (HDRトーン → コントラスト → 色 → クロップ → ルック)
-  Look/                     〜風フィルター
-  Sidecar/                  現像設定を <RAW名>.rawgenzo.json に保存 (非破壊)
-  Export/                   JPEG / HEIF / 16bit TIFF / HDR HEIF
-Sources/rawdev/             確認用CLI
-Sources/RawgenzoApp/        SwiftUIアプリ
+調整パネルのスライダーは、右端の「↶」で初期値に戻ります。
+
+## コマンドラインツール (rawdev)
+
+アプリと同じ現像エンジンをコマンドラインから使えます。フォルダを渡すと中の RAW をまとめて現像します。
+
+```sh
+swift run rawdev check                   # この Mac の Core Image が α7S III に対応しているか
+swift run rawdev info <フォルダ>          # メタデータ・カメラ判定・レンズ補正値を表示
+swift run rawdev develop <フォルダ> --exposure 0.5 --hdr 0.6 --look builtin.film
+swift run rawdev develop <フォルダ> --aspect 16x9 --angle 1.5 --look builtin.cinema --look-strength 0.7
+swift run rawdev develop <フォルダ> --hdr-output --format heif-hdr
+swift run rawdev looks                   # 使えるルックの一覧
+swift run rawdev config                  # 設定ファイルの書き出し設定を表示
+swift run rawdev                         # オプションの一覧
 ```
 
-処理の流れ:
+出力先と形式は、指定しなければアプリの書き出し設定に従います(未設定なら RAW と同じフォルダの `developed/`)。
+`--save` を付けると、その設定を写真のサイドカーに保存します。
 
-```
-ARW → デコード(露出・WB・NR・シャープネス) → レンズ補正 → HDRトーン(ハイライト/シャドウ) → コントラスト → 彩度
-    → [機種固有] → 傾き補正・クロップ → ルック → 書き出し
-```
+`swift build -c release` でビルドした `.build/release/rawdev` を PATH の通った場所に置けば、`rawdev` だけで使えます。
 
 ## 設定ファイル
 
-設定は `~/.Rawgenzo/` にまとめて保存する。アプリを入れ直したり識別子を変えたりしても消えない。
+設定は `~/.Rawgenzo/` にまとめて保存します。アプリを入れ直しても消えません。
 
 ```
 ~/.Rawgenzo/
@@ -68,9 +95,9 @@ ARW → デコード(露出・WB・NR・シャープネス) → レンズ補正 
   Looks/         .cube ファイル(ルック)
 ```
 
-`config.json` を手で編集したら、設定画面の「ファイルから読み直す」で反映する。
-読めない形に壊れていた場合は `config.broken-<時刻>.json` に退避して既定値で起動する。
-`"export"` の部分は CLI (`rawdev`) とも共有している。
+`config.json` を手で編集したら、設定画面の「ファイルから読み直す」で反映します。
+読めない形に壊れていた場合は `config.broken-<時刻>.json` に退避して既定値で起動します。
+`"export"` の部分は CLI (`rawdev`) とも共有しています。
 
 ```json
 {
@@ -83,7 +110,7 @@ ARW → デコード(露出・WB・NR・シャープネス) → レンズ補正 
     "colorSpace" : "sRGB",
     "quality" : 0.92
   },
-  "lastFolder" : "/Users/izawa/Dropbox/git/Rawgenzo/Rawgenzo/RAWsample",
+  "lastFolder" : "/Users/you/Pictures/ARW",
   ...
 }
 ```
@@ -124,8 +151,8 @@ ARW → デコード(露出・WB・NR・シャープネス) → レンズ補正 
 CLIで結果だけ確かめる:
 
 ```sh
-swift run rawdev name "{date}_{model}_{seq:3}" RAWsample
-swift run rawdev develop RAWsample --name "{date}_{name}" --out ~/Desktop/out
+swift run rawdev name "{date}_{model}_{seq:3}" <フォルダ>
+swift run rawdev develop <フォルダ> --name "{date}_{name}" --out ~/Desktop/out
 ```
 
 ## 構図ガイド
@@ -267,7 +294,7 @@ CLI では `cube:<ファイル名>` で指定する:
 
 ```sh
 swift run rawdev looks       # 読み込まれたルックの ID と名前の一覧
-swift run rawdev develop RAWsample --look cube:01_TealOrange_Cinematic.cube --look-strength 0.6
+swift run rawdev develop <フォルダ> --look cube:01_TealOrange_Cinematic.cube --look-strength 0.6
 ```
 
 - 一覧に出る名前は、ファイル内の `TITLE` があればそれ、なければファイル名
@@ -276,15 +303,49 @@ swift run rawdev develop RAWsample --look cube:01_TealOrange_Cinematic.cube --lo
 - 自作や市販の `.cube` も同じように置けば使える。ただし対応しているのは 3D LUT だけで、入力が sRGB ガンマのもの。
   Log 素材用(S-Log3 など)の LUT は、この現像結果に掛けると色が大きく崩れる
 
-## 拡張のしかた
+## 開発
 
-### 構図ガイドを追加する
+```sh
+swift build                                   # デバッグビルド
+swift test                                    # ユニットテスト
+RAW_SAMPLE_DIR=<ARWのフォルダ> swift test      # α7S III の実ファイルを使うテストも含める
+```
+
+Xcode で開く場合は `Package.swift` をダブルクリックし、スキームで `RawgenzoApp` を選んで実行します。
+開発の決まりごとや、過去にはまった点は [CLAUDE.md](CLAUDE.md) にまとめてあります。
+
+### 構成
+
+```
+Sources/RAWCore/            現像エンジン (UI非依存)
+  Camera/                   対応カメラの定義と登録
+    Sony/SonyA7S3Profile    α7S III の判定・初期値
+  Decode/                   RAWデコーダ (現在は Core Image の CIRAWFilter)
+  Lens/                     レンズ補正
+  Pipeline/                 デコード後の処理 (HDRトーン → コントラスト → 色 → クロップ → ルック)
+  Look/                     〜風フィルター
+  Sidecar/                  現像設定を <RAW名>.rawgenzo.json に保存 (非破壊)
+  Export/                   JPEG / HEIF / 16bit TIFF / HDR HEIF
+Sources/rawdev/             CLI
+Sources/RawgenzoApp/        SwiftUIアプリ
+```
+
+処理の流れ:
+
+```
+ARW → デコード(露出・WB・NR・シャープネス) → レンズ補正 → HDRトーン(ハイライト/シャドウ) → コントラスト → 彩度
+    → [機種固有] → 傾き補正・クロップ → ルック → 書き出し
+```
+
+### 拡張のしかた
+
+#### 構図ガイドを追加する
 
 `CompositionGuide` に準拠した型を作り、`CompositionGuides.all` に足す。
 座標は表示枠に対する比率 (0...1, 左上原点) の折れ線で返せばよい。
 `DiagonalGuide` が一番短い実装例。色は `GuidePalette` に追加する(未登録なら既定色)。
 
-### カメラを追加する
+#### カメラを追加する
 
 1. `Sources/RAWCore/Camera/<メーカー>/` に `CameraProfile` 準拠の型を作る
    (`matches` でメーカー名・機種名を判定)
@@ -293,7 +354,7 @@ swift run rawdev develop RAWsample --look cube:01_TealOrange_Cinematic.cube --lo
 Core Image が未対応の機種は、`RAWSource` を実装した別デコーダ (LibRawなど) を
 `makeSource` から返せば、アプリ側の変更なしで対応できる。
 
-### 〜風フィルターを追加する
+#### 〜風フィルターを追加する
 
 方法1: コードで書く。`BuiltInLooks` に色変換の関数を1つ足すだけ。
 
@@ -311,6 +372,21 @@ public static let summer = ColorCubeLook(id: "builtin.summer", displayName: "夏
 ~/.Rawgenzo/Looks/
 ```
 
-
 色だけでなく周辺減光や粒子なども加えたい場合は、`Look` プロトコルを直接実装する。
 強さスライダーは共通の仕組みで処理されるので、実装は「強さ100%」の結果を返すだけでよい。
+
+## ライセンス
+
+[MIT License](LICENSE)
+
+Copyright (c) 2026 Yukimitsu IZAWA
+
+### 謝辞
+
+- ソニーのレンズ補正値を補正量に換算する式は、[darktable](https://www.darktable.org/) がリバースエンジニアリングで
+  求めたものを参考にしました(darktable は GPL のため、コードは使わず式だけを参考にしています)。
+  歪曲の補正量は [lensfun](https://lensfun.github.io/) のデータと照合しました。詳しくは `docs/sony-lens-correction.md`
+
+## 作者
+
+Yukimitsu IZAWA <izawa@izawa.org>
