@@ -9,6 +9,9 @@ let usage = """
   rawdev info <ファイル|フォルダ>...   メタデータとカメラ判定結果を表示
   rawdev looks                     使えるルック(〜風フィルター)の一覧
   rawdev params                    数値で調整するパラメータの一覧(範囲・基準値・説明)
+  rawdev stats <ファイル|フォルダ>... [--json] [--long-edge <px>] [--preview <フォルダ>]
+                                   今の設定(サイドカー)で現像した結果の明るさ・白飛び・色の統計
+                                   (--preview は AI に見せるのと同じ縮小 JPEG を書き出す)
   rawdev config                    設定ファイル (~/.Rawgenzo/config.json) の書き出し設定を表示
   rawdev name <テンプレート> <ファイル>...  ファイル名テンプレートの結果を表示(書き出さない)
   rawdev develop <ファイル|フォルダ>... [オプション]
@@ -153,6 +156,80 @@ case "params":
             let unit = p.unit.map { " \($0)" } ?? ""
             print("  \(p.id)  \(p.label)  \(p.range.lowerBound)...\(p.range.upperBound)\(unit)  基準: \(baseline)")
             print("    \(p.summary)")
+        }
+    }
+
+case "stats":
+    var paths: [String] = []
+    var asJSON = false
+    var longEdge = ImageStats.defaultLongEdge
+    var previewDir: URL?
+    var k = 0
+    while k < arguments.count {
+        let arg = arguments[k]
+        func value() -> String {
+            k += 1
+            guard k < arguments.count else { fail("\(arg) に値がありません") }
+            return arguments[k]
+        }
+        switch arg {
+        case "--json": asJSON = true
+        case "--long-edge":
+            let raw = value()
+            guard let v = Int(raw), v >= 16 else { fail("--long-edge は 16 以上の整数です: \(raw)") }
+            longEdge = v
+        case "--preview": previewDir = URL(fileURLWithPath: (value() as NSString).expandingTildeInPath)
+        case let a where a.hasPrefix("--"): fail("未知のオプション: \(a)")
+        default: paths.append(arg)
+        }
+        k += 1
+    }
+    let urls = expand(paths)
+    if urls.isEmpty { fail("RAWファイルが見つかりません") }
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.sortedKeys]
+    for url in urls {
+        do {
+            let start = Date()
+            let photo = try engine.open(url)
+            let image = try engine.pipeline.processFitting(photo, settings: photo.settings, longEdge: longEdge)
+            let stats = try ImageStats.compute(image, maxLongEdge: longEdge)
+            let ms = Int(Date().timeIntervalSince(start) * 1000)
+            if asJSON {
+                print(String(decoding: try encoder.encode(stats), as: UTF8.self))
+            } else {
+                print("■ \(url.lastPathComponent)  (\(stats.width)×\(stats.height) で計算、\(ms)ms)")
+                print(String(format: "  輝度: 平均 %.3f  中央 %.3f  1%%点 %.3f  99%%点 %.3f",
+                             stats.meanLuminance, stats.medianLuminance, stats.p01Luminance, stats.p99Luminance))
+                print(String(format: "  白飛び %.2f%%  黒つぶれ %.2f%%  平均RGB %.3f / %.3f / %.3f",
+                             stats.highlightClipping * 100, stats.shadowClipping * 100,
+                             stats.meanRGB[0], stats.meanRGB[1], stats.meanRGB[2]))
+                let bars = " ▁▂▃▄▅▆▇█"
+                let peak = stats.histogram.max() ?? 1
+                let hist = stats.histogram.map { v -> Character in
+                    let i = peak > 0 ? Int((v / peak * 8).rounded()) : 0
+                    return bars[bars.index(bars.startIndex, offsetBy: i)]
+                }
+                print("  ヒストグラム 暗[\(String(hist))]明")
+                print("  区画ごとの明るさ(上から):")
+                for row in stats.grid {
+                    let cells = row.map { String(format: "%.2f", 0.2126 * $0[0] + 0.7152 * $0[1] + 0.0722 * $0[2]) }
+                    print("    " + cells.joined(separator: " "))
+                }
+                let json = try encoder.encode(stats)
+                print("  JSON にすると \(json.count) バイト")
+            }
+            if let dir = previewDir {
+                try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+                let out = dir.appendingPathComponent(url.deletingPathExtension().lastPathComponent + "_preview.jpg")
+                let data = try PreviewEncoder.jpeg(image)
+                try data.write(to: out)
+                if !asJSON {
+                    print("  縮小画像: \(out.path)  (\(Int(image.extent.width))×\(Int(image.extent.height))、\(data.count / 1024) KB)")
+                }
+            }
+        } catch {
+            FileHandle.standardError.write("✗ \(url.lastPathComponent): \(error)\n".data(using: .utf8)!)
         }
     }
 

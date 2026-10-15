@@ -77,6 +77,7 @@ swift run rawdev develop <フォルダ> --aspect 16x9 --angle 1.5 --look builtin
 swift run rawdev develop <フォルダ> --hdr-output --format heif-hdr
 swift run rawdev looks                   # 使えるルックの一覧
 swift run rawdev params                  # 数値で調整するパラメータの範囲と説明
+swift run rawdev stats <フォルダ>         # 今の設定で現像した結果の明るさ・白飛び・色の統計
 swift run rawdev config                  # 設定ファイルの書き出し設定を表示
 swift run rawdev                         # オプションの一覧
 ```

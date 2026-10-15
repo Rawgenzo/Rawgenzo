@@ -34,6 +34,7 @@ swift run rawdev name "{date}_{seq:3}" RAWsample   # ファイル名テンプレ
 swift run rawdev config                      # 設定ファイルの書き出し設定を表示
 swift run rawdev looks                       # ルック一覧
 swift run rawdev params                      # 数値パラメータの一覧(ParameterCatalog)
+swift run rawdev stats RAWsample --preview /tmp/p   # 現像結果の統計(ImageStats)と AI に見せる縮小 JPEG
 ```
 
 - サンプル RAW は `RAWsample/`(α7S III の ARW)。`.gitignore` 済みなのでコミットしない
@@ -56,6 +57,8 @@ Sources/RAWCore/            現像エンジン。UI 非依存(SwiftUI を import
   Config/                   RawgenzoPaths、ExportPreferences、FileNameTemplate、SharedConfig
   Model/                    DevelopSettings(現像パラメータ)、ParameterCatalog(数値パラメータの範囲・基準値・説明)、CropFitting(枠を回転後の画像に収める計算)、
                             PreviewZoom(表示倍率の計算)、RAWMetadata、RAWError
+  Observe/                  ImageStats(現像結果の数値の観測: 輝度・白飛び・ヒストグラム・8×8 区画)、
+                            DevelopPipeline.processFitting(長辺を指定して縮小現像)、PreviewEncoder(縮小 JPEG)
   Sidecar/                  SidecarStore(<RAW名>.rawgenzo.json)
   Export/                   Exporter(JPEG / HEIF / 16bit TIFF / HDR HEIF)
   Photo.swift               Photo と RAWEngine(アプリ・CLI の窓口)
