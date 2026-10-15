@@ -8,6 +8,7 @@ let usage = """
   rawdev check                     このMacのCore Imageがα7S IIIに対応しているか確認
   rawdev info <ファイル|フォルダ>...   メタデータとカメラ判定結果を表示
   rawdev looks                     使えるルック(〜風フィルター)の一覧
+  rawdev params                    数値で調整するパラメータの一覧(範囲・基準値・説明)
   rawdev config                    設定ファイル (~/.Rawgenzo/config.json) の書き出し設定を表示
   rawdev name <テンプレート> <ファイル>...  ファイル名テンプレートの結果を表示(書き出さない)
   rawdev develop <ファイル|フォルダ>... [オプション]
@@ -17,12 +18,12 @@ develop のオプション:
   --name <テンプレート>    出力ファイル名 例: "{date}_{name}" (既定: 設定のテンプレート)
   --seq-start <番号>       {seq} の開始番号 (既定: 1。CLIは設定の連番を進めない)
   --format <形式>          jpeg | heif | tiff16 | heif-hdr (既定: 設定の形式)
-  --exposure <EV>          露出補正 例: 0.7
+  --exposure <EV>          露出補正 -3...3 例: 0.7
   --contrast <値>          コントラスト -1.2...1.2 (0 = そのまま。アプリの -120...+120 に当たる)
   --sharpness <値>         シャープネス 0...6 (既定 1。等倍で描くときだけ効く)
   --luma-nr <値>           輝度ノイズ除去 0...1 (既定は ISO に応じてデコーダが決める)
   --color-nr <値>          色ノイズ除去 0...2 (既定 0.5)
-  --saturation <倍率>      彩度 例: 1.2 (1 = そのまま)
+  --saturation <倍率>      彩度 0...2 例: 1.2 (1 = そのまま)
   --vibrance <値>          自然な彩度 -1...1
   --hdr <強さ>             HDR風トーン 0...1
   --highlights <値>        ハイライト回復 0...1
@@ -36,6 +37,7 @@ develop のオプション:
   --look <id>              ルック (rawdev looks で確認)
   --look-strength <値>     ルックの強さ 0...1
   --scale <倍率>           縮小して書き出し 例: 0.5
+  (数値の調整は範囲外を端に丸める。範囲はアプリのスライダーと同じ)
   --save                   この設定をサイドカーに保存
 """
 
@@ -65,6 +67,14 @@ func expand(_ paths: [String]) -> [URL] {
         return isDir.boolValue ? ((try? engine.listCandidates(in: url)) ?? []) : [url]
     }
 }
+
+/// 数値の調整オプション → ParameterCatalog の id
+let parameterOptions: [String: String] = [
+    "--exposure": "exposure", "--contrast": "contrast",
+    "--sharpness": "sharpness", "--luma-nr": "luminanceNoiseReduction", "--color-nr": "colorNoiseReduction",
+    "--saturation": "saturation", "--vibrance": "vibrance",
+    "--hdr": "hdr.strength", "--highlights": "hdr.highlights", "--shadows": "hdr.shadows",
+]
 
 func format(_ value: Double?, _ spec: String = "%.1f") -> String {
     value.map { String(format: spec, $0) } ?? "-"
@@ -130,6 +140,22 @@ case "looks":
     }
     print("\n.cube ファイルは次のフォルダに置くと追加されます:\n  \(LookRegistry.userLooksDirectory.path)")
 
+case "params":
+    for group in ParameterGroup.allCases {
+        print("■ \(group.label)")
+        for p in ParameterCatalog.parameters(in: group) {
+            let baseline: String
+            switch p.baseline {
+            case .fixed(let v): baseline = p.formatted(v)
+            case .asShotTemperature, .asShotTint: baseline = "撮影時の値"
+            default: baseline = "デコーダの既定値"
+            }
+            let unit = p.unit.map { " \($0)" } ?? ""
+            print("  \(p.id)  \(p.label)  \(p.range.lowerBound)...\(p.range.upperBound)\(unit)  基準: \(baseline)")
+            print("    \(p.summary)")
+        }
+    }
+
 case "config":
     let path = RawgenzoPaths.configFile.path
     let exists = FileManager.default.fileExists(atPath: path)
@@ -192,16 +218,15 @@ case "develop":
         case "--seq-start": sequence = Int(number())
         case "--scale": scale = number()
         case "--save": save = true
-        case "--exposure": let v = number(); edits.append { s, _ in s.exposure = v }
-        case "--contrast": let v = number(); edits.append { s, _ in s.contrast = v }
-        case "--sharpness": let v = number(); edits.append { s, _ in s.sharpness = v }
-        case "--luma-nr": let v = number(); edits.append { s, _ in s.luminanceNoiseReduction = v }
-        case "--color-nr": let v = number(); edits.append { s, _ in s.colorNoiseReduction = v }
-        case "--saturation": let v = number(); edits.append { s, _ in s.saturation = v }
-        case "--vibrance": let v = number(); edits.append { s, _ in s.vibrance = v }
-        case "--hdr": let v = number(); edits.append { s, _ in s.hdr.strength = v }
-        case "--highlights": let v = number(); edits.append { s, _ in s.hdr.highlights = v }
-        case "--shadows": let v = number(); edits.append { s, _ in s.hdr.shadows = v }
+        case let flag where parameterOptions[flag] != nil:
+            // 範囲は ParameterCatalog(アプリのスライダーと同じ)。範囲外は端に丸めて知らせる
+            let p = ParameterCatalog[parameterOptions[flag]!]
+            let v = number()
+            let clamped = p.clamp(v)
+            if clamped != v {
+                print("\(flag) \(v) は範囲 \(p.range.lowerBound)...\(p.range.upperBound) の外なので \(clamped) にします")
+            }
+            edits.append { s, _ in p.set(clamped, in: &s) }
         case "--hdr-output": edits.append { s, _ in s.hdr.extendedOutput = true }
         case "--crop":
             cropEdited = true

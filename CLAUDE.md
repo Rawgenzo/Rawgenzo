@@ -33,6 +33,7 @@ swift run rawdev develop RAWsample --hdr 0.5 --look builtin.film
 swift run rawdev name "{date}_{seq:3}" RAWsample   # ファイル名テンプレートの確認(書き出さない)
 swift run rawdev config                      # 設定ファイルの書き出し設定を表示
 swift run rawdev looks                       # ルック一覧
+swift run rawdev params                      # 数値パラメータの一覧(ParameterCatalog)
 ```
 
 - サンプル RAW は `RAWsample/`(α7S III の ARW)。`.gitignore` 済みなのでコミットしない
@@ -53,7 +54,7 @@ Sources/RAWCore/            現像エンジン。UI 非依存(SwiftUI を import
   Look/                     Look、LookRegistry、BuiltInLooks、ColorCubeLook、CubeFileLook(.cube)
   Composition/              構図ガイドの幾何計算(CompositionGuide)
   Config/                   RawgenzoPaths、ExportPreferences、FileNameTemplate、SharedConfig
-  Model/                    DevelopSettings(現像パラメータ)、CropFitting(枠を回転後の画像に収める計算)、
+  Model/                    DevelopSettings(現像パラメータ)、ParameterCatalog(数値パラメータの範囲・基準値・説明)、CropFitting(枠を回転後の画像に収める計算)、
                             PreviewZoom(表示倍率の計算)、RAWMetadata、RAWError
   Sidecar/                  SidecarStore(<RAW名>.rawgenzo.json)
   Export/                   Exporter(JPEG / HEIF / 16bit TIFF / HDR HEIF)
@@ -196,6 +197,9 @@ ARW → CameraRegistry が機種判定 → CameraProfile.makeSource → RAWSourc
   黄金三角形用の `flipTriangle`)、アプリ側の `GuideDisplay`(保存項目)とメニューにも追加する
 - **処理段**: `DevelopStage` を実装し、適切な `phase` を付けて `DevelopPipeline.makeDefault` に追加。
   パラメータは `DevelopSettings` に足す(互換性の決まりに従う)
+- **数値パラメータ**: `DevelopSettings` に足したら `ParameterCatalog.all` にも記述を足す。範囲・基準値(↶ の戻り先)・表示の書式・説明は
+  ここが唯一の置き場で、調整パネルのスライダー・CLI の範囲チェック・(今後の)AI の道具の説明はここから作る。
+  説明文(summary)には画面を見ても分からない注意(効く条件・効く向き)を書く。AI はこれを頼りに操作する
 - **テンプレート変数**: `FileNameTemplate.variables` と `value(_:_:_:)` の両方に追加し、README の表も更新
 
 新しい機能には RAWCore 側のテストを付ける。幾何計算や文字列処理のように見た目で確かめにくいものほど数値で検証する。

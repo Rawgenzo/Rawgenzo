@@ -76,12 +76,14 @@ swift run rawdev develop <フォルダ> --exposure 0.5 --hdr 0.6 --look builtin.
 swift run rawdev develop <フォルダ> --aspect 16x9 --angle 1.5 --look builtin.cinema --look-strength 0.7
 swift run rawdev develop <フォルダ> --hdr-output --format heif-hdr
 swift run rawdev looks                   # 使えるルックの一覧
+swift run rawdev params                  # 数値で調整するパラメータの範囲と説明
 swift run rawdev config                  # 設定ファイルの書き出し設定を表示
 swift run rawdev                         # オプションの一覧
 ```
 
 出力先と形式は、指定しなければアプリの書き出し設定に従います(未設定なら RAW と同じフォルダの `developed/`)。
 `--save` を付けると、その設定を写真のサイドカーに保存します。
+露出や彩度などの数値はアプリのスライダーと同じ範囲で受け付け、範囲の外は端の値に丸めます(`rawdev params` で確認できます)。
 
 `swift build -c release` でビルドした `.build/release/rawdev` を PATH の通った場所に置けば、`rawdev` だけで使えます。
 
