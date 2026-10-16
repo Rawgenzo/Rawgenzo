@@ -43,19 +43,25 @@ public struct AppViewState: Sendable {
     }
 }
 
-/// AI に操作させるときの作業場所: 1 つのフォルダと、その中の写真。
-/// 写真はフォルダの中のファイル名(ID)で指す。フォルダの外のファイルには触らない。
+/// AI に操作させるときの作業場所: 既定のフォルダ(作業フォルダ)と、写真の指し方。
+/// 写真の ID は、作業フォルダの中ならファイル名、それ以外のフォルダなら RAW ファイルの絶対パス。
+/// 最初の版は作業フォルダの中しか指せず、アプリで別のフォルダの写真を開いていると AI が道具を使えなかった(2026-10-16 の試験)。
+/// 指せるのは RAW ファイル(カメラの判定で候補になるもの)だけで、書くのはその隣のサイドカーだけ。
 ///
 /// スレッドについての約束: Surface と同じく 1 つのスレッドからだけ使う(Photo の中の CIRAWFilter はスレッドセーフでないため)
 public final class RawgenzoWorkspace {
     public enum WorkspaceError: Error, CustomStringConvertible {
         case invalidID(String)
         case notFound(String)
+        case folderNotFound(String)
 
         public var description: String {
             switch self {
-            case .invalidID(let id): return "写真の ID が正しくありません: \(id)(list_photos が返すファイル名を使ってください)"
+            case .invalidID(let id):
+                return "写真の ID が正しくありません: \(id)(list_photos が返す photo を使ってください。"
+                    + "作業フォルダの外の写真は、RAW ファイルの絶対パスで指せます)"
             case .notFound(let id): return "写真が見つかりません: \(id)"
+            case .folderNotFound(let path): return "フォルダが見つかりません: \(path)(絶対パスで指定してください)"
             }
         }
     }
@@ -76,20 +82,56 @@ public final class RawgenzoWorkspace {
         self.engine = engine
     }
 
-    /// フォルダ内の写真の ID(ファイル名)。名前順
-    public func photoIDs() throws -> [String] {
-        try engine.listCandidates(in: folder).map(\.lastPathComponent)
+    /// フォルダ内の写真の ID。名前順。folder を省くと作業フォルダ
+    public func photoIDs(in other: URL? = nil) throws -> [String] {
+        let dir = try other.map(resolveFolder) ?? folder
+        return try engine.listCandidates(in: dir).map(id(for:))
     }
 
-    /// ID → ファイルの場所。フォルダの外を指す ID(/ や .. を含むもの)は受け付けない
+    /// フォルダの指定(絶対パス。~ も可)→ 場所
+    public func resolveFolder(_ url: URL) throws -> URL {
+        let dir = url.standardizedFileURL
+        var isDir: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: dir.path, isDirectory: &isDir), isDir.boolValue else {
+            throw WorkspaceError.folderNotFound(url.path)
+        }
+        return dir
+    }
+
+    public func resolveFolder(path: String) throws -> URL {
+        let expanded = (path as NSString).expandingTildeInPath
+        guard expanded.hasPrefix("/") else { throw WorkspaceError.folderNotFound(path) }
+        return try resolveFolder(URL(fileURLWithPath: expanded, isDirectory: true))
+    }
+
+    /// ファイルの場所 → ID(作業フォルダの直下ならファイル名、それ以外は絶対パス)
+    public func id(for url: URL) -> String {
+        let u = url.standardizedFileURL
+        return u.deletingLastPathComponent().standardizedFileURL.path == folder.path ? u.lastPathComponent : u.path
+    }
+
+    /// ID → ファイルの場所。ファイル名なら作業フォルダの中、/ か ~/ で始まれば絶対パス。
+    /// 相対パス(a/b.ARW や ../x.ARW)・隠しファイル・RAW でないファイルは受け付けない
     public func url(for id: String) throws -> URL {
-        guard !id.isEmpty, !id.contains("/"), !id.contains("\\"), id != ".", id != "..", !id.hasPrefix(".") else {
+        let url: URL
+        if id.hasPrefix("/") || id.hasPrefix("~/") {
+            url = URL(fileURLWithPath: (id as NSString).expandingTildeInPath).standardizedFileURL
+        } else {
+            guard !id.isEmpty, !id.contains("/"), !id.contains("\\"), id != ".", id != ".." else {
+                throw WorkspaceError.invalidID(id)
+            }
+            url = folder.appendingPathComponent(id)
+        }
+        guard !url.lastPathComponent.hasPrefix("."), engine.registry.isCandidate(url) else {
             throw WorkspaceError.invalidID(id)
         }
-        let url = folder.appendingPathComponent(id)
-        guard engine.registry.isCandidate(url) else { throw WorkspaceError.invalidID(id) }
         guard FileManager.default.fileExists(atPath: url.path) else { throw WorkspaceError.notFound(id) }
         return url
+    }
+
+    /// AI が渡した ID を、結果で返す形(id(for:))にそろえる
+    public func canonicalID(_ id: String) throws -> String {
+        self.id(for: try url(for: id))
     }
 
     public func metadata(_ id: String) throws -> RAWMetadata {

@@ -72,8 +72,8 @@ Sources/OperationSurface/   AI などに操作を委ねる汎用の操作面(Fou
   UnixSocket                起動中のアプリの操作面に別プロセスからつなぐ Unix ソケット(0600)
   MCPRouter                 MCP のメッセージを、起動中のアプリ(ソケットの先)か自分の操作面かに、メッセージごとに振り分ける
 Sources/RawgenzoSurface/    Rawgenzo の領域定義(RAWCore と OperationSurface を使う)
-  RawgenzoWorkspace         作業フォルダと写真(ID = フォルダ内のファイル名。フォルダの外は指せない)
-  RawgenzoTools             道具: get_app_state / list_photos / get_photo / get_stats / get_preview / adjust / solve_exposure
+  RawgenzoWorkspace         作業フォルダと写真(ID = 作業フォルダの中ならファイル名、外なら RAW ファイルの絶対パス)
+  RawgenzoTools             道具: get_app_state / list_photos / get_photo / get_stats / get_preview / adjust / set_crop / solve_exposure
                             (+ undo / recent_operations)
   RawgenzoAgentHost         アプリの中でソケット(~/.Rawgenzo/agent.sock)を受け、作業フォルダごとの操作面につなぐ。
                             RawgenzoBridge(中継との決まり: 最初の通知 rawgenzo/workspace で作業フォルダを知らせる)
@@ -185,6 +185,14 @@ ARW → CameraRegistry が機種判定 → CameraProfile.makeSource → RAWSourc
   人の変更は `flushSave` で実際に保存したときだけ `noteHumanChange` で記録する(AI の取り消しを断る判断に使う)
 - 操作面のキューからメインへは `DispatchQueue.main.sync` で移る。**メインスレッドから操作面のキューを待たない**こと
   (人の変更の記録は queue.async で渡している)。待つと行き詰まる
+- **写真はどのフォルダにあっても指せる**(作業フォルダの外は絶対パスの ID。list_photos の folder でほかのフォルダも見られる)。
+  最初の版は作業フォルダの中しか指せず、アプリで別のフォルダの写真を開いていると、AI が道具を諦めて CLI でサイドカーを直接書いた
+  (取り消せず、開いているアプリの画面にも出ない。2026-10-16 の試験)。指せるのは RAW の候補になるファイルだけで、書くのはその隣のサイドカーだけ。
+  結果の ID は `RawgenzoWorkspace.id(for:)` の形にそろえる(同じ写真をファイル名と絶対パスで二重に数えない)。
+  人の変更の記録(`noteHumanChange`)は、写真のフォルダに限らず全部の操作面に送る
+- **切り抜き(set_crop)**: 枠の座標は傾き補正の後・切り抜く前の画像に対する比率。AI は get_preview の `ignore_crop` で
+  切り抜く前の全体を見て枠を決める(傾きは当てたまま見せる。枠の座標が傾けた後の画像に対するものなので)。
+  枠は CLI と同じく、はみ出すときだけ `fitted` で収める。枠と比率の両方が来たら中心を保って縮める(`CropSettings.shrunk(toAspect:)`)
 - 写真が「開いている写真」かはパスの文字列(standardizedFileURL)で比べる。シンボリックリンクの先は見ないので、
   AItrial(リンク)と RAWsample(実体)を別々に開くと別の写真として扱われ、サイドカーも別になる
 - `rawdev mcp` の標準出力は MCP のメッセージ専用。**print を使わない**(説明・ログは標準エラーへ)。
@@ -298,6 +306,6 @@ README.md(利用者向けの説明)も合わせて更新する。
 - `config.json` を外部で編集した場合は手動で「ファイルから読み直す」が必要(ファイル監視なし)
 - アプリ内チャット(AI をアプリに内蔵する。API キーを預かる形)は 2026-10-16 にオーナーが「一旦見送り」と判断。
   検討の内容・認証の流れ・ChatGPT 対応の考え方・再開するときの進め方は `docs/ai-in-app-chat.md`
-- AI から操作できないもの: クロップ・ルックの選択・書き出し。取り消しの履歴はアプリと rawdev とで別々
+- AI から操作できないもの: ルックの選択・書き出し。取り消しの履歴はアプリと rawdev とで別々
 - スライダーを初期値に戻すのは右端の「↶」ボタンだけ。Lightroom のように名前のダブルクリックで戻す操作は無い
   (2026-10-07 にオーナーが「今は見送り」と判断)

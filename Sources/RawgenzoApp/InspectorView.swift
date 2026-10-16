@@ -142,11 +142,13 @@ struct InspectorView: View {
                 })) {
                 ForEach(AspectRatio.allCases, id: \.self) { Text($0.label).tag($0) }
             }
+            .modifier(AgentHighlight(isOn: model.agentHighlights.contains("crop")))
 
             AdjustSlider("傾き補正", value: Binding(
                 get: { model.settings.crop?.angle ?? 0 },
                 set: { model.setTiltAngle($0) }),
                 range: CropSettings.angleRange, neutral: 0, format: "%+.1f°")
+                .modifier(AgentHighlight(isOn: model.agentHighlights.contains("crop")))
 
             Button("収まる最大まで広げる") {
                 model.maximizeCrop()

@@ -128,6 +128,19 @@ final class CropFittingTests: XCTestCase {
         return o
     }
 
+    /// 比率に合わせて縮めるときは、中心を保ち、長すぎる辺だけを縮める
+    func testShrunkToAspectKeepsCenter() {
+        let c = CropSettings(x: 0.1, y: 0.2, width: 0.6, height: 0.6)
+        let wide = c.shrunk(toAspect: 1, imageAspect: landscape)   // 画面上は横長なので幅を縮める
+        XCTAssertEqual(wide.width * landscape / wide.height, 1, accuracy: 1e-9)
+        XCTAssertEqual(wide.height, 0.6, accuracy: 1e-12)
+        XCTAssertEqual(wide.x + wide.width / 2, 0.4, accuracy: 1e-12)
+        let tall = c.shrunk(toAspect: 3, imageAspect: landscape)   // もっと横長にするので高さを縮める
+        XCTAssertEqual(tall.width * landscape / tall.height, 3, accuracy: 1e-9)
+        XCTAssertEqual(tall.width, 0.6, accuracy: 1e-12)
+        XCTAssertEqual(tall.y + tall.height / 2, 0.5, accuracy: 1e-12)
+    }
+
     func testZeroAngleLeavesCropUnchanged() {
         let c = CropSettings(x: 0.1, y: 0.2, width: 0.5, height: 0.4)
         XCTAssertEqual(c.fitted(imageAspect: landscape), c)

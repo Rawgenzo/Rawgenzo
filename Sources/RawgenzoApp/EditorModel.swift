@@ -475,6 +475,7 @@ final class EditorModel: ObservableObject {
         case "get_preview": what = "縮小画像を見ています"
         case "recent_operations": what = "操作の履歴を見ています"
         case "undo": what = "変更を取り消しました"
+        case "set_crop": what = "\(task)切り抜きを変更しました"
         default: what = "\(task)写真を変更しました"
         }
         agentActivity = AgentActivity(message: "AI(\(who))が\(what)\(r.isError ? "(失敗)" : "")", date: Date())
