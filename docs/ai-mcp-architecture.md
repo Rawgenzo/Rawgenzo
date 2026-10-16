@@ -2,6 +2,7 @@
 
 2026-10-16 時点の実装(main `2e553ca`)の説明。誰が、どのプロセスで、どちら向きに、何を伝えているかをまとめる。
 検討の経緯と、実装前の考え方は [ai-agent-architecture.md](ai-agent-architecture.md) にある。
+アプリに AI を内蔵する形(アプリ内チャット)の検討は [ai-in-app-chat.md](ai-in-app-chat.md)(2026-10-16 に一旦見送り)。
 
 ## 登場人物
 
