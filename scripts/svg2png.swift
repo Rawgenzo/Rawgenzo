@@ -1,5 +1,7 @@
 // docs/images の図(SVG)を、WebKit(Safari と同じ描画)で 2 倍の解像度の PNG にする。
 // GitHub の文書には PNG を貼り、SVG は編集用の元として残す。
+// 普段は librsvg の `rsvg-convert --zoom=2 -o out.png in.svg` を使う。これは rsvg-convert が無いときの次善の策
+// (追加のインストールが要らない)。
 //
 //   swiftc -O -o /tmp/svg2png scripts/svg2png.swift
 //   /tmp/svg2png docs/images/ai-mcp-overview.svg docs/images/ai-mcp-overview.png

@@ -97,7 +97,7 @@ Tests/OperationSurfaceTests/ OperationSurface のテスト
 Tests/RawgenzoSurfaceTests/  RawgenzoSurface のテスト(実サンプルは一時フォルダに写して使う。サンプルのフォルダにサイドカーを書かない)
 scripts/make-app.sh         .app 化・アドホック署名・インストール
 scripts/make_icon.py        アイコン生成(Pillow + numpy)
-scripts/svg2png.swift       docs/images の図(SVG)を WebKit で 2 倍の PNG にする
+scripts/svg2png.swift       docs/images の図(SVG)を WebKit で 2 倍の PNG にする(rsvg-convert が無いときの次善の策)
 Resources/AppIcon.png       アプリアイコン(1024px)
 ```
 
@@ -152,7 +152,7 @@ ARW → CameraRegistry が機種判定 → CameraProfile.makeSource → RAWSourc
 
 ### 操作面(OperationSurface)
 
-プロセスと通信の全体像は `docs/ai-mcp-architecture.md`(実装の説明。図は `docs/images/` の SVG が元で、文書には `scripts/svg2png.swift` で作った PNG を貼る。Mermaid は図が小さく読みにくかったのでやめた)。検討の経緯は `docs/ai-agent-architecture.md`。
+プロセスと通信の全体像は `docs/ai-mcp-architecture.md`(実装の説明。図は `docs/images/` の SVG が元で、文書には `rsvg-convert --zoom=2` で作った PNG を貼る。無ければ次善の策として `scripts/svg2png.swift`。Mermaid は図が小さく読みにくかったのでやめた)。検討の経緯は `docs/ai-agent-architecture.md`。
 通信の経路や道具を変えたら、`ai-mcp-architecture.md` も合わせて直す。
 
 - 汎用部分なので Rawgenzo 固有のこと(写真・現像設定)を持ち込まない。他のソフトでも使える形を保つ

@@ -73,12 +73,20 @@
 ## 図の直し方
 
 図の元は `docs/images/*.svg`(手で編集する)。文書には PNG を貼っている(SVG のままだと、見る環境によって
-日本語の書体や表示が変わるため)。SVG を直したら、WebKit で描いて PNG を作り直す:
+日本語の書体や表示が変わるため)。SVG を直したら、librsvg の `rsvg-convert` で 2 倍の PNG を作り直す
+(Homebrew の `librsvg`。日本語は macOS のヒラギノで描かれる):
+
+```sh
+rsvg-convert --zoom=2 -o docs/images/ai-mcp-overview.png docs/images/ai-mcp-overview.svg
+rsvg-convert --zoom=2 -o docs/images/ai-mcp-sequence.png docs/images/ai-mcp-sequence.svg
+```
+
+`rsvg-convert` が無い環境では、次善の策として `scripts/svg2png.swift`(macOS の WebKit で描く。追加のインストールは要らない)を使う。
+太字の太さなど、rsvg-convert とは少し見た目が違う:
 
 ```sh
 swiftc -O -o /tmp/svg2png scripts/svg2png.swift
 /tmp/svg2png docs/images/ai-mcp-overview.svg docs/images/ai-mcp-overview.png
-/tmp/svg2png docs/images/ai-mcp-sequence.svg docs/images/ai-mcp-sequence.png
 ```
 
 ## 主なソース
