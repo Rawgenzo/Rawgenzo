@@ -21,7 +21,7 @@ final class RawgenzoToolsSchemaTests: XCTestCase {
         let ws = RawgenzoWorkspace(folder: FileManager.default.temporaryDirectory)
         let surface = RawgenzoTools.makeSurface(workspace: ws)
         XCTAssertEqual(surface.descriptors.map(\.name),
-                       ["get_app_state", "list_photos", "get_photo", "get_stats", "get_preview", "adjust", "set_crop", "list_looks", "set_look", "solve_exposure", "undo", "recent_operations"])
+                       ["get_app_state", "list_photos", "get_photo", "get_stats", "get_preview", "adjust", "set_crop", "list_looks", "set_look", "set_lens_correction", "set_hdr_output", "reset_settings", "solve_exposure", "undo", "recent_operations"])
         XCTAssertEqual(surface.descriptors.first { $0.name == "adjust" }?.effect, .modify)
     }
 
@@ -348,6 +348,62 @@ final class RawgenzoToolsSampleTests: XCTestCase {
         for _ in 0..<5 { XCTAssertFalse(surface.call("undo", as: ai).isError) }
         XCTAssertNil(try workspace.photo(id).settings.look)
         XCTAssertNil(try workspace.photo(id2).settings.look)
+    }
+
+    /// set_lens_correction: 渡した項目だけを変え(ほかは今掛かっている補正のまま)、follow_camera でカメラ設定に戻す
+    func testSetLensCorrection() throws {
+        let start = try json(surface.call("get_photo", arguments: ["photo": .string(id)], as: ai))["lens_correction"]
+        guard start?["available"] == true else { throw XCTSkip("サンプルのレンズに補正情報が無い") }
+        XCTAssertEqual(start?["follows_camera"], true)
+        let camera = try XCTUnwrap(workspace.photo(id).effectiveLensSettings(DevelopSettings()))
+
+        let r = try json(surface.call("set_lens_correction", arguments: ["photos": [.string(id)],
+                                                                        "distortion": .bool(!camera.distortion)], as: ai))
+        XCTAssertEqual(r["results"]?.arrayValue?.first?["lens_correction"]?["to"]?["follows_camera"], false)
+        var expected = camera
+        expected.distortion.toggle()
+        XCTAssertEqual(SidecarStore().load(for: folder.appendingPathComponent(id))?.settings.lens, expected, "ほかの項目はカメラ設定のまま")
+
+        _ = try json(surface.call("set_lens_correction", arguments: ["photos": [.string(id)], "follow_camera": true], as: ai))
+        XCTAssertNil(try workspace.photo(id).settings.lens)
+        XCTAssertTrue(surface.call("set_lens_correction", arguments: ["photos": [.string(id)]], as: ai).isError)
+        XCTAssertTrue(surface.call("set_lens_correction", arguments: ["photos": [.string(id)], "follow_camera": true,
+                                                                     "vignetting": false], as: ai).isError)
+        for _ in 0..<2 { XCTAssertFalse(surface.call("undo", as: ai).isError) }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: sidecar.path))
+    }
+
+    func testSetHDROutput() throws {
+        let r = try json(surface.call("set_hdr_output", arguments: ["photos": [.string(id)], "enabled": true], as: ai))
+        XCTAssertEqual(r["results"]?.arrayValue?.first?["hdr_output"]?["to"], true)
+        XCTAssertEqual(SidecarStore().load(for: folder.appendingPathComponent(id))?.settings.hdr.extendedOutput, true)
+        XCTAssertEqual(try json(surface.call("get_photo", arguments: ["photo": .string(id)], as: ai))["hdr_output"], true)
+        XCTAssertFalse(surface.call("undo", as: ai).isError)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: sidecar.path))
+    }
+
+    /// reset_settings: 全部を初期値に戻す。keep に挙げたものは残す。undo で戻る
+    func testResetSettings() throws {
+        _ = try json(surface.call("adjust", arguments: ["edits": [["photos": [.string(id)], "changes": ["exposure": 1, "temperature": 4000]]],
+                                                        "observe": false], as: ai))
+        _ = try json(surface.call("set_crop", arguments: ["photos": [.string(id)], "aspect": "square"], as: ai))
+        _ = try json(surface.call("set_look", arguments: ["photos": [.string(id)], "look": "builtin.film"], as: ai))
+        let edited = try workspace.photo(id).settings
+
+        let r = try json(surface.call("reset_settings", arguments: ["photos": [.string(id)], "keep": ["crop"]], as: ai))
+        let reset = r["results"]?.arrayValue?.first?["reset"]?.arrayValue ?? []
+        XCTAssertTrue(reset.contains("exposure") && reset.contains("look") && !reset.contains("crop"), "\(reset)")
+        var s = try workspace.photo(id).settings
+        XCTAssertEqual(s.exposure, 0)
+        XCTAssertNil(s.temperature)
+        XCTAssertNil(s.look)
+        XCTAssertEqual(s.crop, edited.crop)
+
+        XCTAssertFalse(surface.call("undo", as: ai).isError)
+        s = try workspace.photo(id).settings
+        XCTAssertEqual(s, edited)
+        let again = try json(surface.call("reset_settings", arguments: ["photos": [.string(id2)]], as: ai))
+        XCTAssertNotNil(again["results"]?.arrayValue?.first?["notes"], "もともと初期値")
     }
 
     /// get_preview の look は仮に当てるだけで、保存しない
