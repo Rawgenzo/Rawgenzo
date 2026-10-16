@@ -214,11 +214,17 @@ final class SurfaceTests: XCTestCase {
         let s = makeSurface(Counter())
         _ = s.call("get", as: ai)
         _ = s.call("add", arguments: ["amount": 2], as: ai)
-        let r = s.call("recent_operations", arguments: ["limit": 2], as: ai)
-        guard case .json(let v)? = r.content.first, let list = v.arrayValue else { return XCTFail("JSON が返らない") }
-        XCTAssertEqual(list.count, 2)
-        XCTAssertEqual(list[0]["tool"], "add", "新しい順")
-        XCTAssertEqual(list[1]["tool"], "get")
+        _ = s.call("add", arguments: ["amount": 3], as: ai)
+        func list(_ args: JSONValue) -> [JSONValue] {
+            guard case .json(let v)? = s.call("recent_operations", arguments: args, as: ai).content.first else { return [] }
+            return v.arrayValue ?? []
+        }
+        let changes = list(["limit": 5])
+        XCTAssertEqual(changes.map { $0["tool"] }, ["add", "add"], "既定では読むだけの操作を含めない。新しい順")
+        XCTAssertEqual(changes[0]["arguments"], #"{"amount":3}"#)
+        XCTAssertEqual(changes[0]["undoable"], true)
+        let all = list(["limit": 2, "include_reads": true])
+        XCTAssertEqual(all.map { $0["tool"] }, ["recent_operations", "add"])
     }
 
     func testDescriptorsKeepRegistrationOrder() {

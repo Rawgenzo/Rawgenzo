@@ -44,16 +44,22 @@ final class RawgenzoToolsSampleTests: XCTestCase {
     private var folder: URL!
     private var surface: Surface!
     private var id = ""
+    private var id2 = ""
     private let ai = Caller.agent("test")
 
     override func setUpWithError() throws {
         guard let dir = ProcessInfo.processInfo.environment["RAW_SAMPLE_DIR"] else { throw XCTSkip("RAW_SAMPLE_DIR が未設定") }
         let samples = try RAWEngine().listCandidates(in: URL(fileURLWithPath: (dir as NSString).expandingTildeInPath))
-        let source = try XCTUnwrap(samples.first)
+        guard samples.count >= 2 else { throw XCTSkip("サンプルが 2 枚以上必要") }
         folder = FileManager.default.temporaryDirectory.appendingPathComponent("rawgenzo-surface-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        try FileManager.default.copyItem(at: source, to: folder.appendingPathComponent(source.lastPathComponent))
-        id = source.lastPathComponent
+        // コピーせずシンボリックリンクにする(AItrial と同じ形。サイドカーはリンクの隣に書かれる)
+        for source in samples.prefix(2) {
+            try FileManager.default.createSymbolicLink(at: folder.appendingPathComponent(source.lastPathComponent),
+                                                       withDestinationURL: source)
+        }
+        id = samples[0].lastPathComponent
+        id2 = samples[1].lastPathComponent
         surface = RawgenzoTools.makeSurface(workspace: RawgenzoWorkspace(folder: folder))
     }
 
@@ -71,7 +77,7 @@ final class RawgenzoToolsSampleTests: XCTestCase {
 
     func testListAndGetPhoto() throws {
         let list = try json(surface.call("list_photos", as: ai))
-        XCTAssertEqual(list["total"], 1)
+        XCTAssertEqual(list["total"], 2)
         XCTAssertEqual(list["photos"]?.arrayValue?.first?["photo"], .string(id))
         XCTAssertEqual(list["photos"]?.arrayValue?.first?["edited"], false)
         XCTAssertEqual(try json(surface.call("list_photos", arguments: ["iso_min": 10_000_000], as: ai))["total"], 0)
@@ -87,7 +93,7 @@ final class RawgenzoToolsSampleTests: XCTestCase {
     func testAdjustSavesAndUndoRestores() throws {
         let before = try json(surface.call("get_stats", arguments: ["photo": .string(id)], as: ai))
         let r = try json(surface.call("adjust", arguments: [
-            "photos": [.string(id)], "changes": ["exposure": 1, "saturation": 1.2],
+            "edits": [["photos": [.string(id)], "changes": ["exposure": 1, "saturation": 1.2]]],
         ], as: ai))
         XCTAssertEqual(r["results"]?.arrayValue?.first?["changed"]?["exposure"]?["to"], 1)
         XCTAssertEqual(r["results"]?.arrayValue?.first?["changed"]?["exposure"]?["from"], 0)
@@ -98,6 +104,7 @@ final class RawgenzoToolsSampleTests: XCTestCase {
         XCTAssertEqual(saved.settings.exposure, 1)
         XCTAssertEqual(saved.settings.saturation, 1.2)
         XCTAssertEqual(try json(surface.call("list_photos", arguments: ["edited": true], as: ai))["total"], 1)
+        XCTAssertEqual(r["results"]?.arrayValue?.count, 1, "変えていない写真は結果に出ない")
 
         XCTAssertFalse(surface.call("undo", as: ai).isError)
         XCTAssertFalse(FileManager.default.fileExists(atPath: sidecar.path), "サイドカーが無かった写真は無い状態に戻る")
@@ -107,9 +114,9 @@ final class RawgenzoToolsSampleTests: XCTestCase {
 
     /// サイドカーがあった写真の undo は、前の設定を書き戻す。null は基準値に戻す
     func testUndoRestoresPreviousSidecarAndNullResets() throws {
-        _ = try json(surface.call("adjust", arguments: ["photos": [.string(id)], "changes": ["temperature": 4000],
+        _ = try json(surface.call("adjust", arguments: ["edits": [["photos": [.string(id)], "changes": ["temperature": 4000]]],
                                                         "observe": false], as: ai))
-        _ = try json(surface.call("adjust", arguments: ["photos": [.string(id)], "changes": ["temperature": nil],
+        _ = try json(surface.call("adjust", arguments: ["edits": [["photos": [.string(id)], "changes": ["temperature": nil]]],
                                                         "observe": false], as: ai))
         var state = try json(surface.call("get_photo", arguments: ["photo": .string(id)], as: ai))
         XCTAssertEqual(state["adjustments"]?["temperature"], state["as_shot"]?["temperature"])
@@ -121,12 +128,12 @@ final class RawgenzoToolsSampleTests: XCTestCase {
 
     /// 範囲外・未知の項目は実行前に拒否され、何も書かない
     func testInvalidChangesAreRejected() throws {
-        let r1 = surface.call("adjust", arguments: ["photos": [.string(id)], "changes": ["exposure": 9]], as: ai)
+        let r1 = surface.call("adjust", arguments: ["edits": [["photos": [.string(id)], "changes": ["exposure": 9]]]], as: ai)
         XCTAssertTrue(r1.isError)
-        XCTAssertTrue(r1.summary.contains("$.changes.exposure"), r1.summary)
-        let r2 = surface.call("adjust", arguments: ["photos": [.string(id)], "changes": ["brightness": 1]], as: ai)
+        XCTAssertTrue(r1.summary.contains("$.edits[0].changes.exposure"), r1.summary)
+        let r2 = surface.call("adjust", arguments: ["edits": [["photos": [.string(id)], "changes": ["brightness": 1]]]], as: ai)
         XCTAssertTrue(r2.isError)
-        let r3 = surface.call("adjust", arguments: ["photos": [.string(id), "nope.ARW"], "changes": ["exposure": 1]], as: ai)
+        let r3 = surface.call("adjust", arguments: ["edits": [["photos": [.string(id), "nope.ARW"], "changes": ["exposure": 1]]]], as: ai)
         XCTAssertTrue(r3.isError)
         XCTAssertFalse(FileManager.default.fileExists(atPath: sidecar.path), "1 枚でも見つからなければ何も変えない")
     }
@@ -149,6 +156,25 @@ final class RawgenzoToolsSampleTests: XCTestCase {
             .flatMap { CGImageSourceCopyPropertiesAtIndex($0, 0, nil) as? [CFString: Any] })
         XCTAssertLessThanOrEqual(max(size[kCGImagePropertyPixelWidth] as! Int, size[kCGImagePropertyPixelHeight] as! Int), 256)
         XCTAssertFalse(FileManager.default.fileExists(atPath: sidecar.path))
+    }
+
+    /// 写真ごとに違う変更を 1 回の呼び出しで当て、undo 1 回でまとめて戻る(試験で undo が 4 回要った問題の対策)
+    func testPerPhotoEditsAreOneTransaction() throws {
+        let r = try json(surface.call("adjust", arguments: ["edits": [
+            ["photos": [.string(id)], "changes": ["exposure": 0.5]],
+            ["photos": [.string(id2)], "changes": ["exposure": -0.5]],
+            ["photos": [.string(id), .string(id2)], "changes": ["saturation": 1.1]],
+        ]], as: ai))
+        let results = try XCTUnwrap(r["results"]?.arrayValue)
+        XCTAssertEqual(results.map { $0["photo"] }, [.string(id), .string(id2)])
+        XCTAssertEqual(results[0]["changed"]?["exposure"]?["to"], 0.5)
+        XCTAssertEqual(results[1]["changed"]?["exposure"]?["to"], -0.5)
+        XCTAssertEqual(results[1]["changed"]?["saturation"]?["to"], 1.1)
+        XCTAssertEqual(r["stats"]?.objectValue?.count, 2)
+
+        XCTAssertFalse(surface.call("undo", as: ai).isError)
+        XCTAssertEqual(try json(surface.call("list_photos", arguments: ["edited": true], as: ai))["total"], 0)
+        XCTAssertTrue(surface.call("undo", as: ai).isError, "取引は 1 つだけ")
     }
 }
 

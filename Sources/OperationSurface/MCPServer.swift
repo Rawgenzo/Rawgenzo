@@ -18,6 +18,10 @@ public final class MCPServer {
 
     public struct CallRecord: Sendable {
         public var tool: String
+        /// 渡された引数(後から何をしたか分かるように記録する)
+        public var arguments: JSONValue
+        /// 結果の要約(画像は大きさだけ。ToolResult.summary)
+        public var summary: String
         public var isError: Bool
         public var durationMs: Int
         /// 結果の文字(JSON・説明)のバイト数
@@ -101,7 +105,9 @@ public final class MCPServer {
             }
             let start = Date()
             let result = surface.call(name, arguments: params["arguments"] ?? .object([:]), as: caller)
-            let (json, record) = Self.resultJSON(result, tool: name, start: start)
+            let (json, measured) = Self.resultJSON(result, tool: name, start: start)
+            var record = measured
+            record.arguments = params["arguments"] ?? .object([:])
             onToolCall?(record)
             return json
         default:
@@ -146,7 +152,7 @@ public final class MCPServer {
                 images.append((size.0, size.1, data.count))
             }
         }
-        let record = CallRecord(tool: tool, isError: r.isError,
+        let record = CallRecord(tool: tool, arguments: .object([:]), summary: r.summary, isError: r.isError,
                                 durationMs: Int(Date().timeIntervalSince(start) * 1000),
                                 textBytes: textBytes, images: images)
         return (["content": .array(content), "isError": .bool(r.isError)], record)

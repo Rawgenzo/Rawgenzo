@@ -280,6 +280,7 @@ case "mcp":
             "duration_ms": .number(Double(r.durationMs)), "text_bytes": .number(Double(r.textBytes)),
             "images": .array(r.images.map { [.number(Double($0.width)), .number(Double($0.height)), .number(Double($0.bytes))] }),
             "image_tokens_estimate": .number(Double(imageTokens)),
+            "arguments": r.arguments, "summary": .string(r.summary),
         ]
         logHandle?.write(Data((entry.jsonString() + "\n").utf8))
         logError("[rawgenzo] \(r.tool) \(r.isError ? "失敗" : "成功") \(r.durationMs)ms 文字 \(r.textBytes)B 画像 \(r.images.count) 枚")

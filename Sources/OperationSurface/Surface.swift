@@ -235,19 +235,29 @@ public final class Surface {
         }
         register(ToolDescriptor(
             name: "recent_operations", title: "操作の履歴",
-            description: "このソフトで行われた最近の操作(誰が・どの道具を・結果)を新しい順に返す",
-            input: .object([.init("limit", .integer("返す件数(既定 20)", minimum: 1, maximum: 200))]),
+            description: "このソフトで行われた最近の操作(誰が・どの道具を・どんな引数で・結果)を新しい順に返す。"
+                + "読むだけの操作は含めない(include_reads で含める)",
+            input: .object([
+                .init("limit", .integer("返す件数(既定 10)", minimum: 1, maximum: 200)),
+                .init("include_reads", .boolean("読むだけの操作も含めるか(既定 false)")),
+            ]),
             effect: .read)) { [unowned self] args, _ in
-            let limit = args["limit"]?.intValue ?? 20
-            let entries = self.auditLog.suffix(limit).reversed().map { e -> JSONValue in
-                [
-                    "seq": .number(Double(e.sequence)),
-                    "caller": .string(e.caller.description),
-                    "tool": .string(e.tool),
-                    "outcome": .string(e.outcome.rawValue),
-                    "summary": .string(e.summary),
-                ]
-            }
+            let limit = args["limit"]?.intValue ?? 10
+            let includeReads = args["include_reads"]?.boolValue ?? false
+            func short(_ s: String) -> String { s.count > 120 ? String(s.prefix(120)) + "…" : s }
+            let entries = self.auditLog.reversed()
+                .filter { includeReads || ($0.effect ?? .read) > .propose }
+                .prefix(limit)
+                .map { e -> JSONValue in
+                    [
+                        "seq": .number(Double(e.sequence)),
+                        "caller": .string(e.caller.description),
+                        "tool": .string(e.tool),
+                        "arguments": .string(short(e.arguments.jsonString())),
+                        "outcome": .string(e.outcome.rawValue),
+                        "undoable": .bool(e.undoable),
+                    ]
+                }
             return .json(.array(Array(entries)))
         }
     }

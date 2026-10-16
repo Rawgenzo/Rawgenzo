@@ -148,42 +148,77 @@ public enum RawgenzoTools {
 
         surface.register(ToolDescriptor(
             name: "adjust", title: "現像設定を変える",
-            description: "写真の現像設定を変えてサイドカーに保存する。photos に複数の写真を渡すと同じ変更をまとめて当てる"
-                + "(1 回の呼び出しは undo でまとめて取り消せる)。結果には変更前後の値と、"
-                + "写真が 3 枚以下なら変更後の主な統計(get_stats の summary)が付く",
+            description: "写真の現像設定を変えてサイドカーに保存する。edits の各要素は「photos に changes を当てる」。"
+                + "写真ごとに違う値にしたいときは edits を複数並べる(同じ写真が複数の要素に出てきたら順に当てる)。"
+                + "1 回の呼び出しは 1 つの取引で、undo 1 回でまとめて取り消せる。関連する変更は 1 回の呼び出しにまとめること。"
+                + "結果には写真ごとの変更前後の値と、変更した写真が \(observeLimit) 枚以下なら変更後の主な統計(get_stats の summary)が付く",
             input: .object([
-                .init("photos", .array(of: photoID, description: "変える写真の ID", minItems: 1, maxItems: 1000)),
-                .init("changes", changesSchema),
-                .init("observe", .boolean("変更後の統計を付けるか(既定 true。写真が 3 枚以下のとき)")),
-            ], required: ["photos", "changes"]),
+                .init("edits", .array(of: .object([
+                    .init("photos", .array(of: photoID, description: "変える写真の ID", minItems: 1, maxItems: 1000)),
+                    .init("changes", changesSchema),
+                ], required: ["photos", "changes"]), description: "当てる変更の並び", minItems: 1, maxItems: 1000)),
+                .init("observe", .boolean("変更後の統計を付けるか(既定 true。変更した写真が \(observeLimit) 枚以下のとき)")),
+            ], required: ["edits"]),
             effect: .modify)) { args, ctx in
-            let ids = args["photos"]!.arrayValue!.compactMap(\.stringValue)
-            let changes = args["changes"]!
-            guard !(changes.objectValue ?? [:]).isEmpty else { return .error("changes に変える項目がありません") }
+            let edits = args["edits"]!.arrayValue!
+            // 写真ごとに、当てる changes を順に集める(登場順を保つ)
+            var order: [String] = []
+            var perPhoto: [String: [JSONValue]] = [:]
+            for edit in edits {
+                let changes = edit["changes"]!
+                guard !(changes.objectValue ?? [:]).isEmpty else { return .error("changes に変える項目がありません") }
+                for id in edit["photos"]!.arrayValue!.compactMap(\.stringValue) {
+                    if perPhoto[id] == nil { order.append(id) }
+                    perPhoto[id, default: []].append(changes)
+                }
+            }
             // 先に全部の ID を確かめる(途中で見つからない写真があって半分だけ変わる、を避ける)
-            for id in ids { _ = try ws.url(for: id) }
+            for id in order { _ = try ws.url(for: id) }
 
+            let observe = (args["observe"]?.boolValue ?? true) && order.count <= observeLimit
             var results: [JSONValue] = []
             var observed: [String: JSONValue] = [:]
-            let observe = (args["observe"]?.boolValue ?? true) && ids.count <= 3
-            for id in Set(ids).sorted() {
+            for id in order {
                 let photo = try ws.photo(id)
                 let before = photo.settings
-                let hadSidecar = ws.hasSidecar(id)
                 var after = before
-                let diff = apply(changes, to: &after, photo: photo)
-                try ws.save(photo, settings: after)
-                ctx.registerUndo("\(id) の設定", resource: photo.url.path) {
-                    let p = try ws.photo(id)
-                    if hadSidecar { try ws.save(p, settings: before) } else { try ws.removeSidecar(p) }
-                }
-                results.append(["photo": .string(id), "changed": .object(diff)])
+                for changes in perPhoto[id]! { _ = apply(changes, to: &after, photo: photo) }
+                try commit(ws, ctx, photo, from: before, to: after)
+                results.append(["photo": .string(id), "changed": .object(difference(before, after, photo: photo))])
                 if observe { observed[id] = summary(try computeStats(ws, photo, after)) }
             }
             var out: [String: JSONValue] = ["results": .array(results)]
             if !observed.isEmpty { out["stats"] = .object(observed) }
             return .json(.object(out))
         }
+    }
+
+    /// adjust の結果に統計を付ける写真の数の上限(1 枚 0.2 秒ほどかかり、約 180 バイト増える)
+    static let observeLimit = 10
+
+    /// 設定を保存し、取り消しの手順を登録する。サイドカーが無かった写真の取り消しはサイドカーを消して「未編集」に戻す
+    static func commit(_ ws: RawgenzoWorkspace, _ ctx: ToolContext, _ photo: Photo,
+                       from before: DevelopSettings, to after: DevelopSettings) throws {
+        let id = photo.url.lastPathComponent
+        let hadSidecar = ws.hasSidecar(id)
+        try ws.save(photo, settings: after)
+        ctx.registerUndo("\(id) の設定", resource: photo.url.path) {
+            let p = try ws.photo(id)
+            if hadSidecar { try ws.save(p, settings: before) } else { try ws.removeSidecar(p) }
+        }
+    }
+
+    /// 2 つの設定の、数値パラメータの違い(項目ごとの {from, to}。実際に使われる値)
+    static func difference(_ a: DevelopSettings, _ b: DevelopSettings, photo: Photo) -> [String: JSONValue] {
+        let context = photo.parameterContext
+        var diff: [String: JSONValue] = [:]
+        for p in ParameterCatalog.all {
+            let from = p.value(a, context: context), to = p.value(b, context: context)
+            if from != to || p.storedValue(a) != p.storedValue(b) {
+                diff[p.id] = ["from": .number(round4(from)), "to": .number(round4(to))]
+            }
+        }
+        return diff
     }
 
     // MARK: - 下請け
