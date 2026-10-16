@@ -11,7 +11,9 @@ public enum RawgenzoTools {
         設定は写真ごとのサイドカー(<RAW>.rawgenzo.json)に保存されます。adjust の変更は undo で取り消せます。
 
         進め方の目安:
-        - 「この写真」「今開いている写真」と言われたら、get_app_state でユーザがアプリで見ている写真を確かめる
+        - 「この写真」「今開いている写真」と言われたら、そのたびに get_app_state でユーザがアプリで見ている写真を確かめる。
+          会話の前のほうで写真を決めていても、ユーザはアプリで別の写真に切り替えているかもしれない。
+          道具の結果に open_photo_warning が付いたら、対象がアプリで開いている写真と違う
         - list_photos で写真とメタデータ(ISO・レンズ・撮影日時など)を見る。条件で絞り込める。
           作業フォルダ以外のフォルダも folder(絶対パス)で見られ、その写真は絶対パスの ID で指す
         - get_photo で今の設定を見る
@@ -130,7 +132,7 @@ public enum RawgenzoTools {
             input: .object([.init("photo", photoID)], required: ["photo"]),
             effect: .read)) { args, _ in
             let photo = try ws.photo(args["photo"]!.stringValue!)
-            return .json(.object(photoState(photo, id: ws.id(for: photo.url))))
+            return warned(.json(.object(photoState(photo, id: ws.id(for: photo.url)))), ws, [photo.url])
         }
 
         surface.register(ToolDescriptor(
@@ -149,7 +151,7 @@ public enum RawgenzoTools {
             var settings = photo.settings
             if let changes = args["changes"] { _ = apply(changes, to: &settings, photo: photo) }
             let stats = try computeStats(ws, photo, settings)
-            return .json(args["detail"]?.stringValue == "full" ? full(stats) : summary(stats))
+            return warned(.json(args["detail"]?.stringValue == "full" ? full(stats) : summary(stats)), ws, [photo.url])
         }
 
         surface.register(ToolDescriptor(
@@ -176,10 +178,12 @@ public enum RawgenzoTools {
             let image = try ws.engine.pipeline.processFitting(photo, settings: settings,
                                                               longEdge: args["long_edge"]?.intValue ?? 768)
             let jpeg = try PreviewEncoder.jpeg(image, quality: 0.75)
-            return ToolResult([
+            var content: [ToolContent] = [
                 .image(data: jpeg, mimeType: "image/jpeg"),
                 .text("\(Int(image.extent.width))×\(Int(image.extent.height))"),
-            ])
+            ]
+            if let w = openPhotoWarning(ws, [photo.url]) { content.append(.text("open_photo_warning: \(w)")) }
+            return ToolResult(content)
         }
 
         surface.register(ToolDescriptor(
@@ -237,7 +241,7 @@ public enum RawgenzoTools {
             }
             var out: [String: JSONValue] = ["results": .array(results)]
             if !observed.isEmpty { out["stats"] = .object(observed) }
-            return .json(.object(out))
+            return warned(.json(.object(out)), ws, try order.map { try ws.url(for: $0) })
         }
 
         registerCrop(on: surface, workspace: ws)
@@ -337,7 +341,7 @@ public enum RawgenzoTools {
                 if !notes.isEmpty { row["notes"] = .array(notes.map { .string($0) }) }
                 results.append(.object(row))
             }
-            return .json(["results": .array(results)])
+            return warned(.json(["results": .array(results)]), ws, try ids.map { try ws.url(for: $0) })
         }
     }
 
@@ -415,8 +419,29 @@ public enum RawgenzoTools {
                 if !r.notes.isEmpty { row["notes"] = .array(r.notes.map { .string($0) }) }
                 results.append(.object(row))
             }
-            return .json(["results": .array(results)])
+            return warned(.json(["results": .array(results)]), ws, try ids.map { try ws.url(for: $0) })
         }
+    }
+
+    /// 1 枚の写真を指す呼び出しで、その写真がアプリで開いている写真と違えば、その知らせ(アプリにつながっていないときは nil)。
+    /// 「この写真」を会話の前のほうで決めた写真と解釈し、アプリで切り替えた後の写真ではなく前の写真を変えた(2026-10-16 の試験)。
+    /// 説明文の「get_app_state で確かめる」だけでは、AI が確かめを飛ばしたときに気づけないので、結果で知らせる。
+    /// 複数の写真をまとめて扱う呼び出しには付けない(「全部揃えて」のたびに付くと知らせの意味が薄れる)
+    static func openPhotoWarning(_ ws: RawgenzoWorkspace, _ targets: [URL]) -> String? {
+        guard targets.count == 1, let live = ws.live, let open = live.viewState().openPhoto else { return nil }
+        guard open.standardizedFileURL.path != targets[0].standardizedFileURL.path else { return nil }
+        let id = (try? ws.canonicalID(ws.id(for: open))) ?? open.path
+        return "アプリで今開いているのは \(id) で、この写真ではない。「この写真」「今開いている写真」の指示なら、対象を確かめること"
+    }
+
+    /// JSON の結果に open_photo_warning を足す
+    static func warned(_ result: ToolResult, _ ws: RawgenzoWorkspace, _ targets: [URL]) -> ToolResult {
+        guard let w = openPhotoWarning(ws, targets) else { return result }
+        return ToolResult(result.content.map {
+            guard case .json(.object(var o)) = $0 else { return $0 }
+            o["open_photo_warning"] = .string(w)
+            return .json(.object(o))
+        }, isError: result.isError)
     }
 
     /// adjust の結果に統計を付ける写真の数の上限(1 枚 0.2 秒ほどかかり、約 180 バイト増える)

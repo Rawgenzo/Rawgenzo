@@ -193,6 +193,10 @@ ARW → CameraRegistry が機種判定 → CameraProfile.makeSource → RAWSourc
 - **切り抜き(set_crop)**: 枠の座標は傾き補正の後・切り抜く前の画像に対する比率。AI は get_preview の `ignore_crop` で
   切り抜く前の全体を見て枠を決める(傾きは当てたまま見せる。枠の座標が傾けた後の画像に対するものなので)。
   枠は CLI と同じく、はみ出すときだけ `fitted` で収める。枠と比率の両方が来たら中心を保って縮める(`CropSettings.shrunk(toAspect:)`)
+- **「この写真」の取り違えは結果で知らせる**。1 枚の写真を指す呼び出しで、対象がアプリで開いている写真と違えば、
+  結果に `open_photo_warning` を付ける(`RawgenzoTools.openPhotoWarning`。複数の写真をまとめて扱う呼び出しには付けない)。
+  説明文に「get_app_state で確かめる」と書いてあっても、AI は会話の前のほうで決めた写真を「この写真」と解釈し、
+  アプリで切り替えた後の写真ではなく前の写真をシネマ調にした(2026-10-16 の試験)。説明文だけに頼らない
 - 写真が「開いている写真」かはパスの文字列(standardizedFileURL)で比べる。シンボリックリンクの先は見ないので、
   AItrial(リンク)と RAWsample(実体)を別々に開くと別の写真として扱われ、サイドカーも別になる
 - `rawdev mcp` の標準出力は MCP のメッセージ専用。**print を使わない**(説明・ログは標準エラーへ)。

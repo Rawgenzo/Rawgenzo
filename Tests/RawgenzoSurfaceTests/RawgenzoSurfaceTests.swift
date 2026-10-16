@@ -491,6 +491,25 @@ final class RawgenzoAgentHostTests: XCTestCase {
         XCTAssertEqual(SidecarStore().load(for: outside)?.settings.crop?.x, 0.1)
     }
 
+    /// 1 枚の写真を指す呼び出しで、アプリで開いている写真と違えば結果で知らせる(「この写真」の取り違えに気づけるように)
+    func testWarnsWhenTargetIsNotTheOpenPhoto() throws {
+        func result(_ tool: String, _ args: JSONValue) throws -> JSONValue {
+            let r = try exchange([RawgenzoBridge.handshake(folder: folder),
+                                  #"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"clientInfo":{"name":"t"}}}"#,
+                                  call(2, tool, args)], replies: 2)
+            let text = try XCTUnwrap(r[1]["result"]?["content"]?.arrayValue?.first?["text"]?.stringValue)
+            return try JSONDecoder().decode(JSONValue.self, from: Data(text.utf8))
+        }
+        let other = try result("get_stats", ["photo": .string(ids[1])])
+        XCTAssertTrue(other["open_photo_warning"]?.stringValue?.contains(ids[0]) == true, "\(other)")
+        XCTAssertNil(try result("get_stats", ["photo": .string(ids[0])])["open_photo_warning"])
+        let changed = try result("adjust", ["edits": [["photos": [.string(ids[1])], "changes": ["vibrance": 0.1]]], "observe": false])
+        XCTAssertNotNil(changed["open_photo_warning"])
+        let both = try result("adjust", ["edits": [["photos": [.string(ids[0]), .string(ids[1])], "changes": ["vibrance": 0.2]]],
+                                         "observe": false])
+        XCTAssertNil(both["open_photo_warning"], "複数の写真をまとめて扱うときは付けない")
+    }
+
     func testRequiresHandshake() throws {
         let r = try exchange([#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#], replies: 1)
         XCTAssertNotNil(r.first?["error"])
