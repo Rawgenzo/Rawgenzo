@@ -33,8 +33,15 @@ public enum RawgenzoTools {
     static let photoID = JSONSchema.string("写真の ID(list_photos が返す photo。フォルダ内のファイル名。例 DSC03561.ARW)")
 
     /// adjust の changes。ParameterCatalog の全項目。null で基準値(撮影時の値・デコーダの既定値など)に戻す
-    public static var changesSchema: JSONSchema {
+    public static var changesSchema: JSONSchema { changesSchema(detailed: true) }
+
+    /// - detailed: 各項目の説明を付けるか。説明は adjust にだけ付け、仮の変更を受け取る道具(get_stats など)は
+    ///   範囲だけにする(道具の一覧は会話のたびに AI に送られるので、同じ説明を何度も載せない)
+    public static func changesSchema(detailed: Bool) -> JSONSchema {
         .object(ParameterCatalog.all.map { p in
+            guard detailed else {
+                return .init(p.id, JSONSchema.number(minimum: p.range.lowerBound, maximum: p.range.upperBound).orNull())
+            }
             let unit = p.unit.map { "単位 \($0)。" } ?? ""
             let baseline: String
             switch p.baseline {
@@ -45,7 +52,9 @@ public enum RawgenzoTools {
             let schema = JSONSchema.number("\(p.label)。\(p.summary)。\(unit)\(baseline)",
                                            minimum: p.range.lowerBound, maximum: p.range.upperBound)
             return .init(p.id, schema.orNull())
-        }, description: "変える項目だけを書く。null を書いた項目は基準値に戻す")
+        }, description: detailed
+            ? "変える項目だけを書く。null を書いた項目は基準値に戻す"
+            : "仮に当てる変更。adjust の changes と同じ形(各項目の意味は adjust の説明を参照)。保存はしない")
     }
 
     // MARK: - 道具
@@ -103,7 +112,7 @@ public enum RawgenzoTools {
                 + "長辺 1024 に縮小して計算するので、点光源のようなごく小さな白飛びは数え漏れることがある",
             input: .object([
                 .init("photo", photoID),
-                .init("changes", changesSchema),
+                .init("changes", changesSchema(detailed: false)),
                 .init("detail", .string("summary(既定)か full", oneOf: ["summary", "full"])),
             ], required: ["photo"]),
             effect: .read)) { args, _ in
@@ -122,7 +131,7 @@ public enum RawgenzoTools {
             input: .object([
                 .init("photo", photoID),
                 .init("long_edge", .integer("長辺のピクセル数(既定 768)", minimum: 128, maximum: 1600)),
-                .init("changes", changesSchema),
+                .init("changes", changesSchema(detailed: false)),
             ], required: ["photo"]),
             effect: .read)) { args, _ in
             let photo = try ws.photo(args["photo"]!.stringValue!)

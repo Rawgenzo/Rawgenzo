@@ -35,6 +35,7 @@ swift run rawdev config                      # 設定ファイルの書き出し
 swift run rawdev looks                       # ルック一覧
 swift run rawdev params                      # 数値パラメータの一覧(ParameterCatalog)
 swift run rawdev stats RAWsample --preview /tmp/p   # 現像結果の統計(ImageStats)と AI に見せる縮小 JPEG
+swift run rawdev mcp AItrial --log AItrial/mcp-log.jsonl   # MCP サーバー(stdio)。普段は MCP クライアントが起動する
 ```
 
 - サンプル RAW は `RAWsample/`(α7S III の ARW)。`.gitignore` 済みなのでコミットしない
@@ -66,6 +67,7 @@ Sources/OperationSurface/   AI などに操作を委ねる汎用の操作面(Fou
   JSONValue / JSONSchema    道具の引数・結果の JSON と、入力の形(AI への説明と検証を兼ねる)
   Tool                      Effect(影響の段階)、ToolDescriptor、ToolResult、Caller、ToolContext(取り消しの登録)
   Surface                   道具の登録と呼び出し(検証 → 権限 → 実行 → 監査ログ)、主体ごとの取り消し、汎用の道具(undo 等)
+  MCPServer                 操作面を MCP サーバー(stdio の JSON-RPC。tools だけ)として公開する。Foundation だけで自作
 Sources/RawgenzoSurface/    Rawgenzo の領域定義(RAWCore と OperationSurface を使う)
   RawgenzoWorkspace         作業フォルダと写真(ID = フォルダ内のファイル名。フォルダの外は指せない)
   RawgenzoTools             道具: list_photos / get_photo / get_stats / get_preview / adjust(+ undo / recent_operations)
@@ -147,6 +149,11 @@ ARW → CameraRegistry が機種判定 → CameraProfile.makeSource → RAWSourc
   後から別の主体が同じ対象を変えていたら取り消しを断る(戻すと他人の変更まで消えるため。最初の版はこれを見落としていた)
 - 失敗は例外ではなく `ToolResult.error` で返す(AI に理由を読ませてやり直させるため)
 - 道具の一覧は登録順で返す(AI 側のプロンプトキャッシュを効かせるため。並びを毎回変えない)
+- `rawdev mcp` の標準出力は MCP のメッセージ専用。**print を使わない**(説明・ログは標準エラーへ)。
+  RAWCore など下のライブラリも標準出力に書かないこと
+- 道具の一覧は会話のたびに AI に送られる。同じ長い説明を複数の道具に載せない(項目の説明は adjust にだけ載せている)
+- 試すときは `AItrial/`(サンプルへのシンボリックリンク。サイドカーはこのフォルダに書かれる)と、
+  手元の `.mcp.json` を使う。どちらも .gitignore 済み(`.mcp.json` は手元の絶対パスを含むので公開しない)
 - Rawgenzo の道具(`RawgenzoTools`)の入力の形・説明は `ParameterCatalog` から作る。道具の結果の JSON のキーは snake_case にそろえる
 - `RawgenzoWorkspace` は写真を開くたびにサイドカーを読み直す(アプリや CLI が書き換えているかもしれないため)。
   ただし**アプリが同じ写真を開いていると、アプリの自動保存が AI の変更を上書きする**(アプリとの橋渡しは未実装)

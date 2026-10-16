@@ -8,3 +8,7 @@ RAWsample/
 
 build/
 .DS_Store
+
+# AI 委譲の試し用(サンプルへのシンボリックリンクとサイドカー)と、手元の MCP の登録
+AItrial/
+.mcp.json

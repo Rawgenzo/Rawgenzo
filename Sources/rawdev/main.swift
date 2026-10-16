@@ -1,5 +1,7 @@
 import Foundation
 import RAWCore
+import OperationSurface
+import RawgenzoSurface
 
 // rawdev: サンプルRAWで現像エンジンを確かめるためのコマンドラインツール
 
@@ -9,6 +11,9 @@ let usage = """
   rawdev info <ファイル|フォルダ>...   メタデータとカメラ判定結果を表示
   rawdev looks                     使えるルック(〜風フィルター)の一覧
   rawdev params                    数値で調整するパラメータの一覧(範囲・基準値・説明)
+  rawdev mcp <フォルダ> [--log <ファイル>]
+                                   MCP サーバー(stdio)。MCP クライアント(Claude Code など)から起動して、
+                                   フォルダの写真の現像設定を AI に操作させる。--log は呼び出しごとの記録(JSON Lines)
   rawdev stats <ファイル|フォルダ>... [--json] [--long-edge <px>] [--preview <フォルダ>]
                                    今の設定(サイドカー)で現像した結果の明るさ・白飛び・色の統計
                                    (--preview は AI に見せるのと同じ縮小 JPEG を書き出す)
@@ -232,6 +237,55 @@ case "stats":
             FileHandle.standardError.write("✗ \(url.lastPathComponent): \(error)\n".data(using: .utf8)!)
         }
     }
+
+case "mcp":
+    // 標準出力は MCP のメッセージ専用。ここでは print を使わない(説明・エラーは標準エラーへ)
+    func logError(_ s: String) { FileHandle.standardError.write(Data((s + "\n").utf8)) }
+    var folderPath: String?
+    var logURL: URL?
+    var k = 0
+    while k < arguments.count {
+        switch arguments[k] {
+        case "--log":
+            k += 1
+            guard k < arguments.count else { fail("--log に値がありません") }
+            logURL = URL(fileURLWithPath: (arguments[k] as NSString).expandingTildeInPath)
+        case let a where a.hasPrefix("--"): fail("未知のオプション: \(a)")
+        default: folderPath = arguments[k]
+        }
+        k += 1
+    }
+    guard let folderPath else { fail("写真のフォルダを指定してください 例: rawdev mcp ~/Pictures/trip") }
+    let folder = URL(fileURLWithPath: (folderPath as NSString).expandingTildeInPath, isDirectory: true)
+    var isDir: ObjCBool = false
+    guard FileManager.default.fileExists(atPath: folder.path, isDirectory: &isDir), isDir.boolValue else {
+        fail("フォルダが見つかりません: \(folder.path)")
+    }
+    let surface = RawgenzoTools.makeSurface(workspace: RawgenzoWorkspace(folder: folder, engine: engine))
+    let server = MCPServer(surface: surface)
+    var logHandle: FileHandle?
+    if let logURL {
+        if !FileManager.default.fileExists(atPath: logURL.path) {
+            FileManager.default.createFile(atPath: logURL.path, contents: nil)
+        }
+        logHandle = try? FileHandle(forWritingTo: logURL)
+        _ = try? logHandle?.seekToEnd()
+    }
+    let iso = ISO8601DateFormatter()
+    server.onToolCall = { r in
+        // 画像のトークン数は「幅×高さ÷750」の目安(実際の値はモデルによって違う)
+        let imageTokens = r.images.reduce(0) { $0 + $1.width * $1.height / 750 }
+        let entry: JSONValue = [
+            "date": .string(iso.string(from: Date())), "tool": .string(r.tool), "is_error": .bool(r.isError),
+            "duration_ms": .number(Double(r.durationMs)), "text_bytes": .number(Double(r.textBytes)),
+            "images": .array(r.images.map { [.number(Double($0.width)), .number(Double($0.height)), .number(Double($0.bytes))] }),
+            "image_tokens_estimate": .number(Double(imageTokens)),
+        ]
+        logHandle?.write(Data((entry.jsonString() + "\n").utf8))
+        logError("[rawgenzo] \(r.tool) \(r.isError ? "失敗" : "成功") \(r.durationMs)ms 文字 \(r.textBytes)B 画像 \(r.images.count) 枚")
+    }
+    logError("[rawgenzo] MCP サーバーを開始: \(folder.path)(\((try? engine.listCandidates(in: folder).count) ?? 0) 枚)")
+    server.run()
 
 case "config":
     let path = RawgenzoPaths.configFile.path

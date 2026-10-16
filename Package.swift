@@ -19,7 +19,7 @@ let package = Package(
         // Rawgenzo の写真・現像設定を操作面の道具として公開する(領域定義)
         .target(name: "RawgenzoSurface", dependencies: ["RAWCore", "OperationSurface"]),
         // サンプルRAWで動作確認するためのCLI
-        .executableTarget(name: "rawdev", dependencies: ["RAWCore"]),
+        .executableTarget(name: "rawdev", dependencies: ["RAWCore", "OperationSurface", "RawgenzoSurface"]),
         // SwiftUIの最小ビューア
         .executableTarget(name: "RawgenzoApp", dependencies: ["RAWCore"]),
         .testTarget(name: "RAWCoreTests", dependencies: ["RAWCore"]),

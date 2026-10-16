@@ -236,3 +236,97 @@ final class SurfaceTests: XCTestCase {
         XCTAssertEqual(s.auditLog.map(\.sequence), [3, 4, 5])
     }
 }
+
+/// MCP サーバー(stdio の JSON-RPC)
+final class MCPServerTests: XCTestCase {
+    private func makeServer() -> MCPServer {
+        let s = Surface(name: "demo", version: "9", instructions: "説明")
+        s.register(ToolDescriptor(
+            name: "echo", title: "こだま", description: "そのまま返す",
+            input: .object([.init("text", .string())], required: ["text"]), effect: .read)) { args, _ in
+            .json(["echo": args["text"]!])
+        }
+        s.register(ToolDescriptor(name: "picture", title: "絵", description: "画像", effect: .read)) { _, _ in
+            // 2×3 の PNG のヘッダー(IHDR まで)
+            let png: [UInt8] = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52,
+                                0, 0, 0, 2, 0, 0, 0, 3, 8, 2, 0, 0, 0]
+            return ToolResult([.image(data: Data(png), mimeType: "image/png")])
+        }
+        s.register(ToolDescriptor(name: "wipe", title: "消す", description: "消す", effect: .destructive)) { _, _ in .text("x") }
+        return MCPServer(surface: s)
+    }
+
+    private func send(_ server: MCPServer, _ json: String) throws -> JSONValue {
+        let line = try XCTUnwrap(server.handle(line: json), "返事が無い")
+        XCTAssertFalse(line.contains("\n"), "1 行で返す")
+        return try JSONDecoder().decode(JSONValue.self, from: Data(line.utf8))
+    }
+
+    func testInitialize() throws {
+        let server = makeServer()
+        let r = try send(server, #"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"claude-code","version":"1"}}}"#)
+        XCTAssertEqual(r["id"], 1)
+        XCTAssertEqual(r["result"]?["protocolVersion"], "2025-06-18", "対応している版はそのまま返す")
+        XCTAssertEqual(r["result"]?["serverInfo"]?["name"], "demo")
+        XCTAssertEqual(r["result"]?["instructions"], "説明")
+        XCTAssertNotNil(r["result"]?["capabilities"]?["tools"])
+        XCTAssertEqual(server.caller, .agent("mcp:claude-code"))
+
+        let old = try send(makeServer(), #"{"jsonrpc":"2.0","id":"a","method":"initialize","params":{"protocolVersion":"1999-01-01"}}"#)
+        XCTAssertEqual(old["id"], "a")
+        XCTAssertEqual(old["result"]?["protocolVersion"], .string(MCPServer.supportedProtocolVersions[0]))
+    }
+
+    func testNotificationsGetNoReply() {
+        XCTAssertNil(makeServer().handle(line: #"{"jsonrpc":"2.0","method":"notifications/initialized"}"#))
+        XCTAssertNil(makeServer().handle(line: ""))
+    }
+
+    /// 拒否される段階(消す)の道具は一覧に出さない
+    func testToolsList() throws {
+        let r = try send(makeServer(), #"{"jsonrpc":"2.0","id":2,"method":"tools/list"}"#)
+        let tools = try XCTUnwrap(r["result"]?["tools"]?.arrayValue)
+        XCTAssertEqual(tools.map { $0["name"] }, ["echo", "picture"])
+        XCTAssertEqual(tools[0]["inputSchema"]?["required"], ["text"])
+        XCTAssertEqual(tools[0]["annotations"]?["readOnlyHint"], true)
+    }
+
+    func testToolsCall() throws {
+        let server = makeServer()
+        var records: [MCPServer.CallRecord] = []
+        server.onToolCall = { records.append($0) }
+        let r = try send(server, #"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"echo","arguments":{"text":"こんにちは"}}}"#)
+        XCTAssertEqual(r["result"]?["isError"], false)
+        XCTAssertEqual(r["result"]?["content"]?.arrayValue?.first?["text"], #"{"echo":"こんにちは"}"#)
+
+        let bad = try send(server, #"{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"echo","arguments":{}}}"#)
+        XCTAssertEqual(bad["result"]?["isError"], true, "道具の失敗は JSON-RPC のエラーではなく結果で返す")
+
+        let pic = try send(server, #"{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"picture"}}"#)
+        let image = try XCTUnwrap(pic["result"]?["content"]?.arrayValue?.first)
+        XCTAssertEqual(image["type"], "image")
+        XCTAssertEqual(image["mimeType"], "image/png")
+        XCTAssertNotNil(Data(base64Encoded: try XCTUnwrap(image["data"]?.stringValue)))
+
+        XCTAssertEqual(records.map(\.tool), ["echo", "echo", "picture"])
+        XCTAssertEqual(records[2].images.first?.width, 2)
+        XCTAssertEqual(records[2].images.first?.height, 3)
+    }
+
+    func testProtocolErrors() throws {
+        let server = makeServer()
+        XCTAssertEqual(try send(server, "{not json")["error"]?["code"], -32700)
+        XCTAssertEqual(try send(server, #"{"jsonrpc":"2.0","id":6,"method":"resources/list"}"#)["error"]?["code"], -32601)
+        XCTAssertEqual(try send(server, #"{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{}}"#)["error"]?["code"], -32602)
+        XCTAssertEqual(try send(server, #"{"jsonrpc":"2.0","id":8,"method":"ping"}"#)["result"], .object([:]))
+    }
+
+    func testJPEGSize() {
+        // SOI, APP0(長さ 4), SOF0(高さ 0x0100, 幅 0x0200)
+        let jpeg: [UInt8] = [0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x04, 0x00, 0x00,
+                             0xFF, 0xC0, 0x00, 0x11, 0x08, 0x01, 0x00, 0x02, 0x00, 0x03]
+        let size = MCPServer.imageSize(Data(jpeg))
+        XCTAssertEqual(size.0, 512)
+        XCTAssertEqual(size.1, 256)
+    }
+}

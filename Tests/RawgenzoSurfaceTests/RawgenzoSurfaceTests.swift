@@ -151,3 +151,14 @@ final class RawgenzoToolsSampleTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: sidecar.path))
     }
 }
+
+final class RawgenzoToolsSizeTests: XCTestCase {
+    /// 項目の説明は adjust にだけ載せる(道具の一覧は会話のたびに送られるので重複させない)
+    func testParameterSummariesAppearOnlyOnce() {
+        let ws = RawgenzoWorkspace(folder: FileManager.default.temporaryDirectory)
+        let list = JSONValue.array(RawgenzoTools.makeSurface(workspace: ws).descriptors.map { $0.input.toJSON() }).jsonString()
+        for p in ParameterCatalog.all {
+            XCTAssertEqual(list.components(separatedBy: p.summary).count - 1, 1, p.id)
+        }
+    }
+}
