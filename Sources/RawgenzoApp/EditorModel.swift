@@ -432,7 +432,13 @@ final class EditorModel: ObservableObject {
     func applyAgentSettings(_ new: DevelopSettings, for url: URL, origin: ChangeOrigin?) -> Bool {
         guard isOpen(url), let photo else { return false }
         var changed = Set(ParameterCatalog.all.filter { $0.storedValue(settings) != $0.storedValue(new) }.map(\.id))
-        if settings.crop != new.crop { changed.insert("crop") }
+        // 切り抜きは、変わった部分の欄だけを強調する(枠だけ変えたのに傾き補正まで光ると、値が変わったように見える)
+        let (oldCrop, newCrop) = (settings.crop ?? .full, new.crop ?? .full)
+        if (oldCrop.x, oldCrop.y, oldCrop.width, oldCrop.height) != (newCrop.x, newCrop.y, newCrop.width, newCrop.height) {
+            changed.insert("crop.frame")
+        }
+        if oldCrop.aspect != newCrop.aspect { changed.insert("crop.aspect") }
+        if oldCrop.angle != newCrop.angle { changed.insert("crop.angle") }
         if settings.look != new.look { changed.insert("look") }
         if settings.lens != new.lens { changed.insert("lens") }
         if settings.hdr.extendedOutput != new.hdr.extendedOutput { changed.insert("hdr.extendedOutput") }
