@@ -481,10 +481,13 @@ final class EditorModel: ObservableObject {
         let task = r.arguments["task"]?.stringValue.map { "「\($0)」" } ?? ""
         let what: String
         switch r.tool {
+        case "get_app_state": what = "、開いている写真を確かめています"
         case "list_photos", "get_photo": what = "写真の情報を見ています"
         case "get_stats": what = "現像結果の統計を見ています"
         case "get_preview": what = "縮小画像を見ています"
         case "recent_operations": what = "操作の履歴を見ています"
+        case "adjust": what = "\(task)写真の調整を変更しました"
+        case "solve_exposure": what = "\(task)明るさを合わせました"
         case "undo": what = "変更を取り消しました"
         case "set_crop": what = "\(task)切り抜きを変更しました"
         case "list_looks": what = "ルックの一覧を見ています"
@@ -492,7 +495,9 @@ final class EditorModel: ObservableObject {
         case "set_lens_correction": what = "\(task)レンズ補正を変更しました"
         case "set_hdr_output": what = "\(task)HDR 出力を変更しました"
         case "reset_settings": what = "\(task)設定を初期値に戻しました"
-        default: what = "\(task)写真を変更しました"
+        // 文言を登録していない道具は、道具の名前だけを出す。以前は「写真を変更しました」にしていて、
+        // 読むだけの get_app_state でもそう出た(オーナーの指摘)。登録を忘れても「変更した」と誤って言わないようにする
+        default: what = "\(task) \(r.tool) を使いました"
         }
         agentActivity = AgentActivity(message: "AI(\(who))が\(what)\(r.isError ? "(失敗)" : "")", date: Date())
     }
