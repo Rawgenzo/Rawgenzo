@@ -69,10 +69,13 @@ Sources/OperationSurface/   AI などに操作を委ねる汎用の操作面(Fou
   Tool                      Effect(影響の段階)、ToolDescriptor、ToolResult、Caller、ToolContext(取り消しの登録)
   Surface                   道具の登録と呼び出し(検証 → 権限 → 実行 → 監査ログ)、主体ごとの取り消し、汎用の道具(undo 等)
   MCPServer                 操作面を MCP サーバー(stdio の JSON-RPC。tools だけ)として公開する。Foundation だけで自作
+  UnixSocket                起動中のアプリの操作面に別プロセスからつなぐ Unix ソケット(0600)と、stdio ⇄ ソケットの中継
 Sources/RawgenzoSurface/    Rawgenzo の領域定義(RAWCore と OperationSurface を使う)
   RawgenzoWorkspace         作業フォルダと写真(ID = フォルダ内のファイル名。フォルダの外は指せない)
   RawgenzoTools             道具: list_photos / get_photo / get_stats / get_preview / adjust / solve_exposure
                             (+ undo / recent_operations)
+  RawgenzoAgentHost         アプリの中でソケット(~/.Rawgenzo/agent.sock)を受け、作業フォルダごとの操作面につなぐ。
+                            RawgenzoBridge(中継との決まり: 最初の通知 rawgenzo/workspace で作業フォルダを知らせる)
 Sources/RawgenzoApp/        SwiftUI アプリ
   RawgenzoApp.swift         App、メニュー、AppDelegate
   AboutPanel.swift          「Rawgenzo について」(作者・公式ページ・ライセンス)
@@ -86,6 +89,7 @@ Sources/RawgenzoApp/        SwiftUI アプリ
   ExportSettingsView.swift  設定の「書き出し」タブ(テンプレート編集)
   Preferences.swift         設定ウインドウ(一般タブ)、ThumbnailSize
   ThumbnailCache.swift      埋め込みプレビューからのサムネイル
+  AgentLink.swift           AI の操作の受け口(LiveEditing の実装。操作面のキューからメインに移って EditorModel に触る)
 Sources/rawdev/main.swift   CLI
 Tests/RAWCoreTests/         RAWCore のテスト(1ファイル)
 Tests/OperationSurfaceTests/ OperationSurface のテスト
@@ -115,6 +119,7 @@ ARW → CameraRegistry が機種判定 → CameraProfile.makeSource → RAWSourc
 | `<RAW>.rawgenzo.json` | その写真の現像設定(DevelopSettings) | アプリ(自動保存)、CLI(`--save` 時) |
 | `~/.Rawgenzo/config.json` | アプリ設定(AppConfig) | アプリのみ |
 | `~/.Rawgenzo/Looks/*.cube` | ユーザーのルック | オーナーが手で置く |
+| `~/.Rawgenzo/agent.sock` | AI からの操作の受け口(ソケット。設定でオンのときだけ) | アプリ(終了時に消す) |
 
 - `config.json` の `"export"` は CLI も `SharedConfig` で**読む**(書かない)
 
@@ -157,9 +162,19 @@ ARW → CameraRegistry が機種判定 → CameraProfile.makeSource → RAWSourc
   `fullInstructions` で AI への説明に付け足す。ソフト固有の説明(`instructions`)には書かない
 - 失敗は例外ではなく `ToolResult.error` で返す(AI に理由を読ませてやり直させるため)
 - 道具の一覧は登録順で返す(AI 側のプロンプトキャッシュを効かせるため。並びを毎回変えない)
+- **アプリとの橋渡し**: 設定「AI からの操作を受け付ける」(config.json の `agent.enabled`、既定オフ)がオンだと、
+  アプリが `~/.Rawgenzo/agent.sock` で受け付け、`rawdev mcp` はそこへ中継する(つながらなければ自分で処理)。
+  アプリで開いている写真は、AI が編集中の設定(未保存の変更を含む)を読み書きし、画面にその場で出る。
+  AI の変更は `photo.settings` も同じ値にして「保存済み」として扱う(サイドカーは AI の側が書く)ので、アプリの自動保存が書き直さない。
+  人の変更は `flushSave` で実際に保存したときだけ `noteHumanChange` で記録する(AI の取り消しを断る判断に使う)
+- 操作面のキューからメインへは `DispatchQueue.main.sync` で移る。**メインスレッドから操作面のキューを待たない**こと
+  (人の変更の記録は queue.async で渡している)。待つと行き詰まる
+- 写真が「開いている写真」かはパスの文字列(standardizedFileURL)で比べる。シンボリックリンクの先は見ないので、
+  AItrial(リンク)と RAWsample(実体)を別々に開くと別の写真として扱われ、サイドカーも別になる
 - `rawdev mcp` の標準出力は MCP のメッセージ専用。**print を使わない**(説明・ログは標準エラーへ)。
   RAWCore など下のライブラリも標準出力に書かないこと
 - 道具の一覧は会話のたびに AI に送られる。同じ長い説明を複数の道具に載せない(項目の説明は adjust にだけ載せている)
+- テストで実際のソケットのパスを使わないよう、`RAWGENZO_AGENT_SOCKET` で変えられる
 - 試すときは `AItrial/`(サンプルへのシンボリックリンク。サイドカーはこのフォルダに書かれる)と、
   手元の `.mcp.json` を使う。どちらも .gitignore 済み(`.mcp.json` は手元の絶対パスを含むので公開しない)
 - **目標で指示する道具を優先する**。2026-10-16 の試験では、AI が「値を変えて get_stats で見る」を繰り返し

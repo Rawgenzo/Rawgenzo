@@ -83,8 +83,9 @@ struct InspectorView: View {
         }
     }
 
-    /// カタログの記述からスライダーを作る(範囲・基準値・表示の書式はカタログが持つ)
-    private func parameterSlider(_ p: ParameterDescriptor, _ photo: Photo) -> AdjustSlider {
+    /// カタログの記述からスライダーを作る(範囲・基準値・表示の書式はカタログが持つ)。
+    /// AI が直前に変えた項目は、数秒だけ背景に色を付ける
+    private func parameterSlider(_ p: ParameterDescriptor, _ photo: Photo) -> some View {
         let context = photo.parameterContext
         return AdjustSlider(p.label, value: Binding(
             get: { p.value(model.settings, context: context) },
@@ -92,6 +93,7 @@ struct InspectorView: View {
             range: p.range, neutral: p.baselineValue(in: context), format: p.displayFormat,
             displayScale: p.displayScale,
             onReset: { p.reset(&model.settings) })
+        .modifier(AgentHighlight(isOn: model.agentHighlights.contains(p.id)))
     }
 
     /// レンズ補正。サイドカーで指定が無ければ撮影時のカメラ設定に従う(チェックを触るとこの写真用の設定になる)
@@ -306,5 +308,22 @@ struct AdjustSlider: View {
 
     private func reset() {
         if let onReset { onReset() } else { value = neutral }
+    }
+}
+
+/// AI が変えた項目の強調(背景に薄くアクセントカラー)
+struct AgentHighlight: ViewModifier {
+    let isOn: Bool
+
+    func body(content: Content) -> some View {
+        content
+            .padding(.horizontal, 6)
+            .padding(.vertical, 3)
+            .background(RoundedRectangle(cornerRadius: 6)
+                .fill(Color.accentColor.opacity(isOn ? 0.18 : 0)))
+            .padding(.horizontal, -6)
+            .padding(.vertical, -3)
+            .animation(.easeInOut(duration: isOn ? 0.15 : 0.8), value: isOn)
+            .help(isOn ? "AI が変更しました" : "")
     }
 }

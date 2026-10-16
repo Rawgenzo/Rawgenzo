@@ -15,11 +15,13 @@ struct AppConfig: Codable, Equatable {
     var inspector = InspectorPreferences()
     /// 最後に開いていたフォルダ(次回起動時に開き直す)
     var lastFolder: String?
+    /// AI(MCP の中継 rawdev mcp)からの操作を受け付けるか
+    var agent = AgentPreferences()
 
     init() {}
 
     private enum CodingKeys: String, CodingKey {
-        case schemaVersion, export, thumbnails, guides, inspector, lastFolder
+        case schemaVersion, export, thumbnails, guides, inspector, lastFolder, agent
     }
 
     // 項目の追加・欠けに強くする(手で編集されても既定値で補う)
@@ -32,6 +34,22 @@ struct AppConfig: Codable, Equatable {
         guides = try c.decodeIfPresent(GuideDisplay.self, forKey: .guides) ?? d.guides
         inspector = (try? c.decodeIfPresent(InspectorPreferences.self, forKey: .inspector)) ?? d.inspector
         lastFolder = try c.decodeIfPresent(String.self, forKey: .lastFolder)
+        agent = (try? c.decodeIfPresent(AgentPreferences.self, forKey: .agent)) ?? d.agent
+    }
+}
+
+/// AI からの操作の受け付け
+struct AgentPreferences: Codable, Equatable {
+    /// 受け付けるか(既定はオフ。オンの間は同じユーザーの他のプログラムもソケット経由で現像設定を変えられる)
+    var enabled = false
+
+    init() {}
+
+    private enum CodingKeys: String, CodingKey { case enabled }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        enabled = (try? c.decodeIfPresent(Bool.self, forKey: .enabled)) ?? false
     }
 }
 

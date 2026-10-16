@@ -21,7 +21,7 @@ let package = Package(
         // サンプルRAWで動作確認するためのCLI
         .executableTarget(name: "rawdev", dependencies: ["RAWCore", "OperationSurface", "RawgenzoSurface"]),
         // SwiftUIの最小ビューア
-        .executableTarget(name: "RawgenzoApp", dependencies: ["RAWCore"]),
+        .executableTarget(name: "RawgenzoApp", dependencies: ["RAWCore", "OperationSurface", "RawgenzoSurface"]),
         .testTarget(name: "RAWCoreTests", dependencies: ["RAWCore"]),
         .testTarget(name: "OperationSurfaceTests", dependencies: ["OperationSurface"]),
         .testTarget(name: "RawgenzoSurfaceTests", dependencies: ["RawgenzoSurface", "RAWCore", "OperationSurface"]),

@@ -292,6 +292,34 @@ final class RawgenzoAgentHostTests: XCTestCase {
                           "params": ["name": .string(tool), "arguments": args]]).jsonString()
     }
 
+    /// 実際の rawdev mcp を起動し、標準入出力 → ソケット → アプリ(ここでは同じプロセスの host)と中継されること
+    func testRawdevRelaysToHost() throws {
+        let rawdev = Bundle(for: Self.self).bundleURL.deletingLastPathComponent().appendingPathComponent("rawdev")
+        guard FileManager.default.isExecutableFile(atPath: rawdev.path) else { throw XCTSkip("rawdev が見つからない: \(rawdev.path)") }
+        let p = Process()
+        p.executableURL = rawdev
+        p.arguments = ["mcp", folder.path]
+        p.environment = ["RAWGENZO_AGENT_SOCKET": host.socketPath]
+        let input = Pipe(), output = Pipe(), errors = Pipe()
+        p.standardInput = input; p.standardOutput = output; p.standardError = errors
+        try p.run()
+        let lines = [
+            #"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"clientInfo":{"name":"relay"}}}"#,
+            call(2, "adjust", ["edits": [["photos": [.string(ids[0])], "changes": ["vibrance": 0.3]]], "observe": false]),
+        ]
+        input.fileHandleForWriting.write(Data((lines.joined(separator: "\n") + "\n").utf8))
+        try input.fileHandleForWriting.close()
+        p.waitUntilExit()
+        let out = String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        let err = String(decoding: errors.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        XCTAssertTrue(err.contains("中継"), err)
+        let replies = out.split(separator: "\n").compactMap { try? JSONDecoder().decode(JSONValue.self, from: Data($0.utf8)) }
+        XCTAssertEqual(replies.count, 2, out)
+        XCTAssertEqual(replies.last?["result"]?["isError"], false, out)
+        XCTAssertEqual(editor.settings.vibrance, 0.3, "アプリ(host)の編集中の設定に届いた")
+        XCTAssertEqual(editor.applied.last?.1?.caller, .agent("mcp:relay"))
+    }
+
     func testRequiresHandshake() throws {
         let r = try exchange([#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#], replies: 1)
         XCTAssertNotNil(r.first?["error"])

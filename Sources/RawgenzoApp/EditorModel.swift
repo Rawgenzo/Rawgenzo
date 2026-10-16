@@ -2,6 +2,8 @@ import SwiftUI
 import AppKit
 import CoreImage
 import RAWCore
+import OperationSurface
+import RawgenzoSurface
 
 /// 最新の描画要求だけを処理するための世代番号(スレッドセーフ。値は NSLock で守っている)
 private final class Generation: @unchecked Sendable {
@@ -142,6 +144,17 @@ final class EditorModel: ObservableObject {
     }
 
     init() {
+        agentLink.model = self
+        agentHost.live = agentLink
+        agentHost.onToolCall = { [weak self] caller, record in
+            Task { @MainActor in self?.noteAgentCall(caller, record) }
+        }
+        updateAgentHosting()
+        NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil,
+                                               queue: .main) { [weak self] _ in
+            // 終了時にソケットを片付ける(残っても次の起動で片付くが、rawdev mcp が無駄につなぎに来ないように)
+            MainActor.assumeIsolated { self?.agentHost.stop() }
+        }
         // 前回開いていたフォルダを開き直す
         if let path = AppConfigStore.shared.config.lastFolder {
             var isDir: ObjCBool = false
@@ -238,7 +251,12 @@ final class EditorModel: ObservableObject {
         saveTask?.cancel()
         guard let photo, photo.settings != settings else { return }
         photo.settings = settings
-        do { try engine.save(photo) }
+        do {
+            try engine.save(photo)
+            // 人がこの写真を変えたことを AI の操作面に記録する(AI の取り消しが人の変更を消さないように)。
+            // AI の変更はここを通らない(applyAgentSettings で保存済みとして扱う)
+            if agentHost.isRunning { agentHost.noteHumanChange(photo.url) }
+        }
         catch { errorMessage = "設定を保存できません: \(error.localizedDescription)" }
     }
 
@@ -362,4 +380,96 @@ final class EditorModel: ObservableObject {
     }
 
     func dismissExportNotice() { lastExported = nil }
+
+    // MARK: - AI からの操作(rawdev mcp の中継を受ける)
+
+    let agentHost = RawgenzoAgentHost()
+    private let agentLink = AgentLiveLink()
+    /// 受け付けの状態(設定画面に出す)
+    @Published private(set) var agentStatus = "オフ"
+    /// AI の操作の知らせ(プレビュー上部)
+    @Published private(set) var agentActivity: AgentActivity?
+    /// AI が直前に変えたパラメータ(調整パネルで強調する。ParameterCatalog の id と、"crop" "look" "lens" など)
+    @Published private(set) var agentHighlights: Set<String> = []
+    private var highlightToken = 0
+
+    /// 設定に合わせて受け付けを始める・止める
+    func updateAgentHosting() {
+        let enabled = AppConfigStore.shared.config.agent.enabled
+        if enabled, !agentHost.isRunning {
+            do {
+                try agentHost.start()
+                agentStatus = "受け付け中"
+            } catch {
+                agentStatus = "開始できません: \(error)"
+            }
+        } else if !enabled, agentHost.isRunning {
+            agentHost.stop()
+            agentStatus = "オフ"
+        } else if !enabled {
+            agentStatus = "オフ"
+        }
+    }
+
+    private func isOpen(_ url: URL) -> Bool {
+        photo?.url.standardizedFileURL.path == url.standardizedFileURL.path
+    }
+
+    /// AI が読む設定: 開いている写真なら、まだ保存していない変更を含む編集中の値
+    func liveSettingsForAgent(_ url: URL) -> DevelopSettings? {
+        isOpen(url) ? settings : nil
+    }
+
+    /// AI の変更を編集中の設定に反映する。保存済みとして扱い(サイドカーは AI の側が書く)、自動保存で書き直さない
+    func applyAgentSettings(_ new: DevelopSettings, for url: URL, origin: ChangeOrigin?) -> Bool {
+        guard isOpen(url), let photo else { return false }
+        var changed = Set(ParameterCatalog.all.filter { $0.storedValue(settings) != $0.storedValue(new) }.map(\.id))
+        if settings.crop != new.crop { changed.insert("crop") }
+        if settings.look != new.look { changed.insert("look") }
+        if settings.lens != new.lens { changed.insert("lens") }
+        if settings.hdr.extendedOutput != new.hdr.extendedOutput { changed.insert("hdr.extendedOutput") }
+        photo.settings = new
+        settings = new
+        highlight(changed)
+        if let origin {
+            let who = origin.caller.id.replacingOccurrences(of: "mcp:", with: "")
+            let what = origin.task.map { "「\($0)」" } ?? ""
+            agentActivity = AgentActivity(message: origin.isUndo ? "AI(\(who))が\(what)の変更を取り消しました"
+                                                                 : "AI(\(who))が\(what)この写真を変更しました",
+                                          date: Date())
+        }
+        return true
+    }
+
+    private func highlight(_ ids: Set<String>) {
+        guard !ids.isEmpty else { return }
+        agentHighlights = ids
+        highlightToken += 1
+        let token = highlightToken
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 4_000_000_000)
+            guard let self, self.highlightToken == token else { return }
+            self.agentHighlights = []
+        }
+    }
+
+    /// AI が道具を呼んだ(開いていない写真の操作や、読むだけの操作も知らせる)
+    private func noteAgentCall(_ caller: Caller, _ r: MCPServer.CallRecord) {
+        // 開いている写真を変えたときは applyAgentSettings が詳しい知らせを出しているので、上書きしない
+        if let a = agentActivity, Date().timeIntervalSince(a.date) < 1 { return }
+        let who = caller.id.replacingOccurrences(of: "mcp:", with: "")
+        let task = r.arguments["task"]?.stringValue.map { "「\($0)」" } ?? ""
+        let what: String
+        switch r.tool {
+        case "list_photos", "get_photo": what = "写真の情報を見ています"
+        case "get_stats": what = "現像結果の統計を見ています"
+        case "get_preview": what = "縮小画像を見ています"
+        case "recent_operations": what = "操作の履歴を見ています"
+        case "undo": what = "変更を取り消しました"
+        default: what = "\(task)写真を変更しました"
+        }
+        agentActivity = AgentActivity(message: "AI(\(who))が\(what)\(r.isError ? "(失敗)" : "")", date: Date())
+    }
+
+    func dismissAgentActivity() { agentActivity = nil }
 }

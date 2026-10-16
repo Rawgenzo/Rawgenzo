@@ -7,8 +7,11 @@ public enum RawgenzoBridge {
     /// 中継が最初に送る通知のメソッド名。params.folder に作業フォルダ
     public static let workspaceMethod = "rawgenzo/workspace"
 
-    /// アプリが受け付けるソケット(本人だけが読み書きできる)
-    public static var socketPath: String { RawgenzoPaths.home.appendingPathComponent("agent.sock").path }
+    /// アプリが受け付けるソケット(本人だけが読み書きできる)。環境変数 RAWGENZO_AGENT_SOCKET で変えられる(テスト用)
+    public static var socketPath: String {
+        if let p = ProcessInfo.processInfo.environment["RAWGENZO_AGENT_SOCKET"], !p.isEmpty { return p }
+        return RawgenzoPaths.home.appendingPathComponent("agent.sock").path
+    }
 
     public static func handshake(folder: URL) -> String {
         JSONValue.object(["jsonrpc": "2.0", "method": .string(workspaceMethod),
