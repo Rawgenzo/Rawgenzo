@@ -95,7 +95,10 @@ public final class Surface {
         var tool: String
         var task: String?
         var actions: [UndoStep]
-        var resources: Set<String> { Set(actions.map(\.resource)) }
+        /// 手順を持たない記録(noteChange)の対象
+        var notedResources: Set<String> = []
+        var resources: Set<String> { Set(actions.map(\.resource)).union(notedResources) }
+        var isUndoable: Bool { !actions.isEmpty }
     }
     private var undoStack: [Transaction] = []
     /// 取り消しの履歴を残す件数
@@ -186,7 +189,7 @@ public final class Surface {
                           .denied, effect: d.effect)
         }
 
-        let context = ToolContext(caller: caller, descriptor: d)
+        let context = ToolContext(caller: caller, descriptor: d, task: task)
         // 作業名は操作面が扱うので、道具の処理には渡さない
         var handlerArgs = args
         if taskTools.contains(name), case .object(var o) = args {
@@ -263,7 +266,7 @@ public final class Surface {
     /// (取り消しは「変える前の値に戻す」なので、戻すと後の変更まで消えるため)
     @discardableResult
     public func undo(by caller: Caller, task: String? = nil) throws -> UndoOutcome? {
-        let mine = undoStack.indices.filter { undoStack[$0].caller == caller }
+        let mine = undoStack.indices.filter { undoStack[$0].caller == caller && undoStack[$0].isUndoable }
         guard let last = mine.last else {
             if let task { throw UndoError.noSuchTask(task) }
             return nil
@@ -296,9 +299,19 @@ public final class Surface {
         try undo(by: caller)?.tools.first
     }
 
+    /// 操作面を通さずに行われた変更(アプリの画面で人が変えた、など)を記録する。
+    /// 取り消しはできない(手順を持たない)が、後から AI が同じ対象の変更を取り消そうとしたときに断る判断に使う
+    public func noteChange(by caller: Caller, resource: String, description: String) {
+        undoStack.append(Transaction(caller: caller, tool: description, task: nil, actions: [],
+                                     notedResources: [resource]))
+        if undoStack.count > undoLimit { undoStack.removeFirst(undoStack.count - undoLimit) }
+        record(AuditEntry(sequence: 0, date: Date(), caller: caller, tool: description, arguments: ["resource": .string(resource)],
+                          effect: .modify, task: nil, outcome: .succeeded, summary: "", durationMs: 0, undoable: false))
+    }
+
     /// この主体が取り消せる取引の数
     public func undoCount(for caller: Caller) -> Int {
-        undoStack.filter { $0.caller == caller }.count
+        undoStack.filter { $0.caller == caller && $0.isUndoable }.count
     }
 
     /// 汎用の道具(取り消し・操作の履歴)を登録する。どのソフトでも同じ形で AI に見せる

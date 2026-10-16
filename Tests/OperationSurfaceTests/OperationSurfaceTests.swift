@@ -259,6 +259,23 @@ final class SurfaceTests: XCTestCase {
         XCTAssertEqual(c2.value, 11, "何も変えない")
     }
 
+    /// 操作面を通らない人の変更(アプリの画面での操作)も、AI の取り消しを断る判断に使う
+    func testNotedHumanChangeBlocksAgentUndo() {
+        let counter = Counter()
+        let s = makeSurface(counter)
+        _ = s.call("add", arguments: ["amount": 1, "target": "photo-a"], as: ai)
+        s.noteChange(by: person, resource: "photo-a", description: "gui")
+        let r = s.call("undo", as: ai)
+        XCTAssertTrue(r.isError)
+        XCTAssertTrue(r.summary.contains("human:owner"), r.summary)
+        XCTAssertEqual(s.undoCount(for: person), 0, "記録だけで、取り消しの対象にはならない")
+        XCTAssertEqual(s.auditLog.last?.tool, "undo")
+        XCTAssertTrue(s.auditLog.contains { $0.caller == person && $0.tool == "gui" })
+
+        _ = s.call("add", arguments: ["amount": 1, "target": "photo-b"], as: ai)
+        XCTAssertFalse(s.call("undo", as: ai).isError, "別の写真なら取り消せる")
+    }
+
     func testStandardGuidanceIsAddedToInstructions() {
         let s = Surface(name: "x", version: "1", instructions: "ソフトの説明")
         XCTAssertEqual(s.fullInstructions, "ソフトの説明")

@@ -267,10 +267,11 @@ public enum RawgenzoTools {
                        from before: DevelopSettings, to after: DevelopSettings) throws {
         let id = photo.url.lastPathComponent
         let hadSidecar = ws.hasSidecar(id)
-        try ws.save(photo, settings: after)
+        try ws.save(photo, settings: after, origin: ChangeOrigin(caller: ctx.caller, task: ctx.task))
+        let undoOrigin = ChangeOrigin(caller: ctx.caller, task: ctx.task, isUndo: true)
         ctx.registerUndo("\(id) の設定", resource: photo.url.path) {
             let p = try ws.photo(id)
-            if hadSidecar { try ws.save(p, settings: before) } else { try ws.removeSidecar(p) }
+            if hadSidecar { try ws.save(p, settings: before, origin: undoOrigin) } else { try ws.removeSidecar(p, origin: undoOrigin) }
         }
     }
 

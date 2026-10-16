@@ -261,8 +261,6 @@ case "mcp":
     guard FileManager.default.fileExists(atPath: folder.path, isDirectory: &isDir), isDir.boolValue else {
         fail("フォルダが見つかりません: \(folder.path)")
     }
-    let surface = RawgenzoTools.makeSurface(workspace: RawgenzoWorkspace(folder: folder, engine: engine))
-    let server = MCPServer(surface: surface)
     var logHandle: FileHandle?
     if let logURL {
         if !FileManager.default.fileExists(atPath: logURL.path) {
@@ -272,7 +270,8 @@ case "mcp":
         _ = try? logHandle?.seekToEnd()
     }
     let iso = ISO8601DateFormatter()
-    server.onToolCall = { r in
+    let logLock = NSLock()
+    func logCall(_ r: MCPServer.CallRecord, via: String) {
         // 画像のトークン数は「幅×高さ÷750」の目安(実際の値はモデルによって違う)
         let imageTokens = r.images.reduce(0) { $0 + $1.width * $1.height / 750 }
         let entry: JSONValue = [
@@ -280,11 +279,38 @@ case "mcp":
             "duration_ms": .number(Double(r.durationMs)), "text_bytes": .number(Double(r.textBytes)),
             "images": .array(r.images.map { [.number(Double($0.width)), .number(Double($0.height)), .number(Double($0.bytes))] }),
             "image_tokens_estimate": .number(Double(imageTokens)),
-            "arguments": r.arguments, "summary": .string(r.summary),
+            "arguments": r.arguments, "summary": .string(r.summary), "via": .string(via),
         ]
+        logLock.lock(); defer { logLock.unlock() }
         logHandle?.write(Data((entry.jsonString() + "\n").utf8))
-        logError("[rawgenzo] \(r.tool) \(r.isError ? "失敗" : "成功") \(r.durationMs)ms 文字 \(r.textBytes)B 画像 \(r.images.count) 枚")
+        logError("[rawgenzo] \(r.tool) \(r.isError ? "失敗" : "成功") \(r.durationMs)ms 文字 \(r.textBytes)B 画像 \(r.images.count) 枚(\(via))")
     }
+
+    // Rawgenzo アプリが起動していて AI からの操作を受け付けていれば、アプリに中継する
+    // (AI の変更がアプリの画面にその場で出て、アプリの自動保存が上書きしない)。受け付けていなければ自分で処理する
+    if let fd = UnixSocketBridge.connect(path: RawgenzoBridge.socketPath) {
+        logError("[rawgenzo] 起動中の Rawgenzo アプリに中継します: \(folder.path)")
+        var calls: [String: (tool: String, args: JSONValue, start: Date)] = [:]
+        let callsLock = NSLock()
+        UnixSocketBridge.relay(fd: fd, first: [RawgenzoBridge.handshake(folder: folder)]) { line, toServer in
+            guard let m = try? JSONDecoder().decode(JSONValue.self, from: Data(line.utf8)), let id = m["id"] else { return }
+            let key = id.jsonString()
+            callsLock.lock(); defer { callsLock.unlock() }
+            if toServer {
+                if m["method"] == "tools/call", let tool = m["params"]?["name"]?.stringValue {
+                    calls[key] = (tool, m["params"]?["arguments"] ?? .object([:]), Date())
+                }
+            } else if let c = calls.removeValue(forKey: key) {
+                logCall(MCPServer.record(tool: c.tool, arguments: c.args, response: m,
+                                         durationMs: Int(Date().timeIntervalSince(c.start) * 1000)), via: "app")
+            }
+        }
+        exit(0)
+    }
+
+    let surface = RawgenzoTools.makeSurface(workspace: RawgenzoWorkspace(folder: folder, engine: engine))
+    let server = MCPServer(surface: surface)
+    server.onToolCall = { logCall($0, via: "rawdev") }
     logError("[rawgenzo] MCP サーバーを開始: \(folder.path)(\((try? engine.listCandidates(in: folder).count) ?? 0) 枚)")
     server.run()
 

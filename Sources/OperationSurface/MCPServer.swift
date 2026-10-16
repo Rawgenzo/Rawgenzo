@@ -158,6 +158,27 @@ public final class MCPServer {
         return (["content": .array(content), "isError": .bool(r.isError)], record)
     }
 
+    /// 中継で通った tools/call の返事から、記録(大きさ・要約)を作る。アプリにつないで中継するときの記録用
+    public static func record(tool: String, arguments: JSONValue, response: JSONValue, durationMs: Int) -> CallRecord {
+        var textBytes = 0
+        var images: [(Int, Int, Int)] = []
+        var parts: [String] = []
+        for c in response["result"]?["content"]?.arrayValue ?? [] {
+            if let t = c["text"]?.stringValue {
+                textBytes += t.utf8.count
+                parts.append(t.count > 200 ? String(t.prefix(200)) + "…" : t)
+            } else if let b64 = c["data"]?.stringValue, let data = Data(base64Encoded: b64) {
+                let size = imageSize(data)
+                images.append((size.0, size.1, data.count))
+                parts.append("[\(c["mimeType"]?.stringValue ?? "image") \(data.count) バイト]")
+            }
+        }
+        if let e = response["error"]?["message"]?.stringValue { parts.append(e) }
+        return CallRecord(tool: tool, arguments: arguments, summary: parts.joined(separator: " / "),
+                          isError: response["result"]?["isError"]?.boolValue ?? (response["error"] != nil),
+                          durationMs: durationMs, textBytes: textBytes, images: images)
+    }
+
     /// JPEG・PNG の大きさ(ピクセル)。ImageIO を使わずにヘッダーから読む(Foundation だけで済ませるため)
     static func imageSize(_ data: Data) -> (Int, Int) {
         let b = [UInt8](data)

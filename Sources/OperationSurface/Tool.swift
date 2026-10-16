@@ -115,11 +115,14 @@ public struct Caller: Hashable, Sendable, CustomStringConvertible {
 public final class ToolContext {
     public let caller: Caller
     public let descriptor: ToolDescriptor
+    /// 呼び出しに付いた作業名(状態を変える道具のとき)
+    public let task: String?
     var undoActions: [UndoStep] = []
 
-    init(caller: Caller, descriptor: ToolDescriptor) {
+    init(caller: Caller, descriptor: ToolDescriptor, task: String? = nil) {
         self.caller = caller
         self.descriptor = descriptor
+        self.task = task
     }
 
     /// 状態を変えたら、元に戻す手順を登録する。1 回の呼び出しで登録したものは 1 つの取引としてまとめて取り消す

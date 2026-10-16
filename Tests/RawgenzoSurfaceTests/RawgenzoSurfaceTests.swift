@@ -228,3 +228,113 @@ final class RawgenzoToolsSizeTests: XCTestCase {
         }
     }
 }
+
+/// アプリとの橋渡し: ソケット経由で操作し、アプリで開いている写真には編集中の設定として反映する(RAW_SAMPLE_DIR のときだけ)
+final class RawgenzoAgentHostTests: XCTestCase {
+    /// アプリの編集画面の代わり。1 枚だけ開いている
+    final class FakeEditor: LiveEditing {
+        var openURL: URL?
+        var settings = DevelopSettings()
+        var applied: [(DevelopSettings, ChangeOrigin?)] = []
+        func liveSettings(for url: URL) -> DevelopSettings? { url == openURL ? settings : nil }
+        func applyLive(_ s: DevelopSettings, for url: URL, origin: ChangeOrigin?) -> Bool {
+            guard url == openURL else { return false }
+            settings = s
+            applied.append((s, origin))
+            return true
+        }
+    }
+
+    private var folder: URL!
+    private var host: RawgenzoAgentHost!
+    private let editor = FakeEditor()
+    private var ids: [String] = []
+
+    override func setUpWithError() throws {
+        guard let dir = ProcessInfo.processInfo.environment["RAW_SAMPLE_DIR"] else { throw XCTSkip("RAW_SAMPLE_DIR が未設定") }
+        let samples = try RAWEngine().listCandidates(in: URL(fileURLWithPath: (dir as NSString).expandingTildeInPath))
+        guard samples.count >= 2 else { throw XCTSkip("サンプルが 2 枚以上必要") }
+        folder = FileManager.default.temporaryDirectory.appendingPathComponent("rg-host-\(UUID().uuidString.prefix(8))")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        for s in samples.prefix(2) {
+            try FileManager.default.createSymbolicLink(at: folder.appendingPathComponent(s.lastPathComponent), withDestinationURL: s)
+        }
+        ids = samples.prefix(2).map(\.lastPathComponent)
+        editor.openURL = folder.appendingPathComponent(ids[0]).standardizedFileURL
+        // ソケットのパスは 104 バイトまでなので短くする
+        host = RawgenzoAgentHost(socketPath: "/tmp/rg-\(UUID().uuidString.prefix(8)).sock")
+        host.live = editor
+        try host.start()
+    }
+
+    override func tearDownWithError() throws {
+        host?.stop()
+        if let folder { try? FileManager.default.removeItem(at: folder) }
+    }
+
+    /// 行を送り、返事を count 行受け取る
+    private func exchange(_ lines: [String], replies count: Int) throws -> [JSONValue] {
+        let fd = try XCTUnwrap(UnixSocketBridge.connect(path: host.socketPath))
+        defer { close(fd) }
+        for l in lines { UnixSocketBridge.write(fd, l + "\n") }
+        var out: [JSONValue] = []
+        if count > 0 {
+            UnixSocketBridge.readLines(fd) { line in
+                if let v = try? JSONDecoder().decode(JSONValue.self, from: Data(line.utf8)) { out.append(v) }
+                return out.count < count
+            }
+        }
+        return out
+    }
+
+    private func call(_ id: Int, _ tool: String, _ args: JSONValue) -> String {
+        JSONValue.object(["jsonrpc": "2.0", "id": .number(Double(id)), "method": "tools/call",
+                          "params": ["name": .string(tool), "arguments": args]]).jsonString()
+    }
+
+    func testRequiresHandshake() throws {
+        let r = try exchange([#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#], replies: 1)
+        XCTAssertNotNil(r.first?["error"])
+    }
+
+    /// 開いている写真は編集中の設定にも反映し、開いていない写真はサイドカーだけ。人がアプリで変えた後は AI の取り消しを断る
+    func testLiveApplyAndHumanConflict() throws {
+        let hello = RawgenzoBridge.handshake(folder: folder)
+        let r = try exchange([
+            hello,
+            #"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"clientInfo":{"name":"t"}}}"#,
+            call(2, "adjust", ["edits": [["photos": [.string(ids[0]), .string(ids[1])], "changes": ["exposure": 0.5]]],
+                               "observe": false, "task": "試し"]),
+        ], replies: 2)
+        XCTAssertEqual(r[1]["result"]?["isError"], false, r[1].jsonString())
+        XCTAssertEqual(editor.settings.exposure, 0.5, "開いている写真の編集中の設定が変わる")
+        XCTAssertEqual(editor.applied.count, 1, "開いていない写真には触らない")
+        XCTAssertEqual(editor.applied.first?.1?.task, "試し")
+        XCTAssertEqual(editor.applied.first?.1?.caller, .agent("mcp:t"))
+        for id in ids {
+            XCTAssertEqual(SidecarStore().load(for: folder.appendingPathComponent(id))?.settings.exposure, 0.5)
+        }
+
+        // 人がアプリで開いている写真を変えて保存した(と記録する)。AI の取り消しは断られる
+        editor.settings.exposure = 1.0
+        host.noteHumanChange(editor.openURL!)
+        let undo = try exchange([hello, #"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"clientInfo":{"name":"t"}}}"#,
+                                 call(3, "undo", [:])], replies: 2)
+        XCTAssertEqual(undo[1]["result"]?["isError"], true)
+        XCTAssertTrue(undo[1].jsonString().contains("rawgenzo-app"), undo[1].jsonString())
+        XCTAssertEqual(editor.settings.exposure, 1.0, "人の変更は消えない")
+    }
+
+    /// AI の読む設定は、まだ保存していない編集中の値(サイドカーではなく)
+    func testReadsUnsavedLiveSettings() throws {
+        editor.settings.saturation = 1.7
+        let r = try exchange([
+            RawgenzoBridge.handshake(folder: folder),
+            #"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"clientInfo":{"name":"t"}}}"#,
+            call(2, "get_photo", ["photo": .string(ids[0])]),
+        ], replies: 2)
+        let text = try XCTUnwrap(r[1]["result"]?["content"]?.arrayValue?.first?["text"]?.stringValue)
+        let state = try JSONDecoder().decode(JSONValue.self, from: Data(text.utf8))
+        XCTAssertEqual(state["adjustments"]?["saturation"], 1.7)
+    }
+}
