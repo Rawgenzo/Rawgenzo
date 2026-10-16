@@ -1087,3 +1087,289 @@ final class SampleFileTests: XCTestCase {
         XCTAssertEqual(mismatches, 0)
     }
 }
+
+/// ParameterCatalog: スライダー・CLI・AI の道具が共通に使うパラメータの記述
+final class ParameterCatalogTests: XCTestCase {
+    private let context = ParameterContext(asShot: AsShotValues(temperature: 5100, tint: 7),
+                                           detailDefaults: DetailDefaults(sharpness: 1, luminanceNoiseReduction: 0.3,
+                                                                          colorNoiseReduction: 0.5))
+
+    func testIDsAreUniqueAndEveryGroupHasParameters() {
+        XCTAssertEqual(Set(ParameterCatalog.all.map(\.id)).count, ParameterCatalog.all.count)
+        for g in ParameterGroup.allCases {
+            XCTAssertFalse(ParameterCatalog.parameters(in: g).isEmpty, g.rawValue)
+        }
+    }
+
+    /// id はサイドカーの JSON のキー(入れ子は . でつなぐ)と一致する
+    func testIDMatchesSidecarJSONKey() throws {
+        for p in ParameterCatalog.all {
+            var s = DevelopSettings()
+            let v = (p.range.lowerBound + p.range.upperBound) / 2 + 0.125
+            p.set(v, in: &s)
+            let json = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(s)) as? [String: Any])
+            var node: Any? = json
+            for key in p.id.split(separator: ".") { node = (node as? [String: Any])?[String(key)] }
+            XCTAssertEqual(try XCTUnwrap(node as? Double, p.id), v, accuracy: 1e-12, p.id)
+            XCTAssertEqual(p.storedValue(s), v, p.id)
+        }
+    }
+
+    func testSetClampsToRange() {
+        for p in ParameterCatalog.all {
+            var s = DevelopSettings()
+            XCTAssertEqual(p.set(p.range.upperBound + 100, in: &s), p.range.upperBound, p.id)
+            XCTAssertEqual(p.value(s, context: context), p.range.upperBound, p.id)
+            XCTAssertEqual(p.set(p.range.lowerBound - 100, in: &s), p.range.lowerBound, p.id)
+            XCTAssertEqual(p.set(.nan, in: &s), p.range.lowerBound, p.id)
+        }
+    }
+
+    /// 既定の設定では、どのパラメータも基準値(↶ の戻り先)になっている。リセットすると基準値に戻る
+    func testDefaultsAndResetMatchBaseline() {
+        for p in ParameterCatalog.all {
+            var s = DevelopSettings()
+            XCTAssertEqual(p.value(s, context: context), p.baselineValue(in: context), p.id)
+            XCTAssertTrue(p.range.contains(p.baselineValue(in: context)), p.id)
+            p.set(p.range.upperBound, in: &s)
+            p.reset(&s)
+            XCTAssertEqual(p.value(s, context: context), p.baselineValue(in: context), p.id)
+            XCTAssertEqual(p.storedValue(s) == nil, p.isOptional, p.id)
+        }
+    }
+
+    func testBaselineComesFromPhoto() {
+        XCTAssertEqual(ParameterCatalog["temperature"].baselineValue(in: context), 5100)
+        XCTAssertEqual(ParameterCatalog["tint"].baselineValue(in: context), 7)
+        XCTAssertEqual(ParameterCatalog["luminanceNoiseReduction"].baselineValue(in: context), 0.3)
+        XCTAssertEqual(ParameterCatalog["saturation"].baselineValue(in: context), 1)
+    }
+
+    /// 範囲は今までの決まり(デコーダで測って決めた範囲、コントラストのカーブ)と同じ
+    func testRangesFollowExistingLimits() {
+        XCTAssertEqual(ParameterCatalog["contrast"].range, ContrastCurve.range)
+        XCTAssertEqual(ParameterCatalog["sharpness"].range, DetailRanges.sharpness)
+        XCTAssertEqual(ParameterCatalog["luminanceNoiseReduction"].range, DetailRanges.luminanceNoiseReduction)
+        XCTAssertEqual(ParameterCatalog["colorNoiseReduction"].range, DetailRanges.colorNoiseReduction)
+        XCTAssertEqual(ParameterCatalog["exposure"].range, -3...3)
+        XCTAssertEqual(ParameterCatalog["temperature"].range, 2000...12000)
+    }
+
+    func testFormatted() {
+        XCTAssertEqual(ParameterCatalog["exposure"].formatted(0.3), "+0.30 EV")
+        XCTAssertEqual(ParameterCatalog["contrast"].formatted(-0.5), "-50")
+        XCTAssertEqual(ParameterCatalog["temperature"].formatted(5200), "5200 K")
+    }
+
+    /// 説明文に書いた効く向き(色温度を上げると暖色、色かぶりを上げるとマゼンタ寄り)が実際の現像と合う。
+    /// AI はこの説明文を頼りに操作するので、実物で確かめておく(RAW_SAMPLE_DIR のときだけ)
+    func testWhiteBalanceDirectionsMatchSummary() throws {
+        guard let dir = ProcessInfo.processInfo.environment["RAW_SAMPLE_DIR"] else { throw XCTSkip("RAW_SAMPLE_DIR が未設定") }
+        let engine = RAWEngine()
+        let urls = try engine.listCandidates(in: URL(fileURLWithPath: (dir as NSString).expandingTildeInPath))
+        let photo = try engine.open(try XCTUnwrap(urls.first))
+        let ctx = CIContext(options: [.workingColorSpace: NSNull()])
+        func meanRGB(_ edit: (inout DevelopSettings) -> Void) throws -> (r: Double, g: Double, b: Double) {
+            var s = DevelopSettings()
+            edit(&s)
+            let img = try engine.pipeline.process(photo, settings: s, options: RenderOptions(scale: 0.1))
+            let avg = CIFilter(name: "CIAreaAverage", parameters: [kCIInputImageKey: img,
+                                                                  kCIInputExtentKey: CIVector(cgRect: img.extent)])!.outputImage!
+            var px = [Float](repeating: 0, count: 4)
+            ctx.render(avg, toBitmap: &px, rowBytes: 16, bounds: CGRect(x: 0, y: 0, width: 1, height: 1),
+                       format: .RGBAf, colorSpace: CGColorSpace(name: CGColorSpace.sRGB)!)
+            return (Double(px[0]), Double(px[1]), Double(px[2]))
+        }
+        let cool = try meanRGB { ParameterCatalog["temperature"].set(3500, in: &$0) }
+        let warm = try meanRGB { ParameterCatalog["temperature"].set(9000, in: &$0) }
+        XCTAssertGreaterThan(warm.r / warm.b, cool.r / cool.b, "色温度を上げると暖色になるはず")
+        let green = try meanRGB { ParameterCatalog["tint"].set(-100, in: &$0) }
+        let magenta = try meanRGB { ParameterCatalog["tint"].set(100, in: &$0) }
+        XCTAssertGreaterThan((magenta.r + magenta.b) / 2 / magenta.g, (green.r + green.b) / 2 / green.g,
+                             "色かぶりを上げるとマゼンタ寄りになるはず")
+    }
+}
+
+/// ImageStats: AI に画像の代わりに渡す数値の観測
+final class ImageStatsTests: XCTestCase {
+    private let srgb = CGColorSpace(name: CGColorSpace.sRGB)!
+
+    private func solid(_ r: CGFloat, _ g: CGFloat, _ b: CGFloat, _ rect: CGRect) -> CIImage {
+        CIImage(color: CIColor(red: r, green: g, blue: b, alpha: 1, colorSpace: srgb)!).cropped(to: rect)
+    }
+
+    func testUniformGray() throws {
+        let s = try ImageStats.compute(solid(0.5, 0.5, 0.5, CGRect(x: 0, y: 0, width: 200, height: 100)))
+        XCTAssertEqual(s.width, 200)
+        XCTAssertEqual(s.height, 100)
+        XCTAssertEqual(s.meanLuminance, 0.5, accuracy: 0.002)
+        XCTAssertEqual(s.medianLuminance, 0.5, accuracy: 0.002)
+        XCTAssertEqual(s.meanRGB[0], 0.5, accuracy: 0.002)
+        XCTAssertEqual(s.highlightClipping, 0)
+        XCTAssertEqual(s.shadowClipping, 0)
+        XCTAssertEqual(s.histogram.count, ImageStats.histogramBins)
+        XCTAssertEqual(s.histogram.reduce(0, +), 1, accuracy: 0.001)
+        XCTAssertEqual(s.histogram[16], 1, accuracy: 0.001)   // 0.5 は 32 区間の 17 番目
+    }
+
+    /// 上半分が白・下半分が黒(Core Image の座標では y が大きいほうが上)。grid の 1 行目は上端
+    func testClippingAndGridOrientation() throws {
+        let top = solid(1, 1, 1, CGRect(x: 0, y: 80, width: 160, height: 80))
+        let bottom = solid(0, 0, 0, CGRect(x: 0, y: 0, width: 160, height: 80))
+        let s = try ImageStats.compute(top.composited(over: bottom))
+        XCTAssertEqual(s.highlightClipping, 0.5, accuracy: 0.001)
+        XCTAssertEqual(s.shadowClipping, 0.5, accuracy: 0.001)
+        XCTAssertEqual(s.grid.count, ImageStats.gridSize)
+        XCTAssertEqual(s.grid[0][0][1], 1, accuracy: 0.001, "1 行目は上端(白)")
+        XCTAssertEqual(s.grid[7][7][1], 0, accuracy: 0.001, "最後の行は下端(黒)")
+        XCTAssertEqual(s.p01Luminance, 0, accuracy: 0.002)
+        XCTAssertEqual(s.p99Luminance, 1, accuracy: 0.002)
+    }
+
+    /// 左が赤・右が青。列は左から
+    func testGridColumnsAndColorBalance() throws {
+        let left = solid(0.8, 0.2, 0.2, CGRect(x: 0, y: 0, width: 100, height: 100))
+        let right = solid(0.2, 0.2, 0.8, CGRect(x: 100, y: 0, width: 100, height: 100))
+        let s = try ImageStats.compute(left.composited(over: right))
+        XCTAssertGreaterThan(s.grid[3][0][0], s.grid[3][0][2])
+        XCTAssertGreaterThan(s.grid[3][7][2], s.grid[3][7][0])
+        XCTAssertEqual(s.meanRGB[0], s.meanRGB[2], accuracy: 0.002)
+    }
+
+    func testLargeImageIsDownscaled() throws {
+        let s = try ImageStats.compute(solid(0.3, 0.3, 0.3, CGRect(x: 0, y: 0, width: 3000, height: 2000)), maxLongEdge: 300)
+        XCTAssertEqual(s.width, 300)
+        XCTAssertEqual(s.height, 200)
+        XCTAssertEqual(s.meanLuminance, 0.3, accuracy: 0.003)
+    }
+
+    /// JSON にしたとき短くなるよう桁を丸めている(AI に渡すトークンを減らすため)
+    func testJSONIsCompact() throws {
+        let s = try ImageStats.compute(solid(0.123456, 0.5, 0.7, CGRect(x: 0, y: 0, width: 64, height: 64)))
+        let json = String(decoding: try JSONEncoder().encode(s), as: UTF8.self)
+        XCTAssertFalse(json.contains("0.12345"), json)
+        XCTAssertLessThan(json.count, 4000)
+    }
+
+    /// 実際の ARW: 縮小現像の大きさ、露出を上げると平均輝度と白飛びが増えること、JPEG が作れること
+    func testSamplePhoto() throws {
+        guard let dir = ProcessInfo.processInfo.environment["RAW_SAMPLE_DIR"] else { throw XCTSkip("RAW_SAMPLE_DIR が未設定") }
+        let engine = RAWEngine()
+        let urls = try engine.listCandidates(in: URL(fileURLWithPath: (dir as NSString).expandingTildeInPath))
+        let photo = try engine.open(try XCTUnwrap(urls.first))
+
+        var s = DevelopSettings()
+        s.crop = .centered(aspect: .square, imageAspect: photo.imageAspect)
+        let square = try engine.pipeline.processFitting(photo, settings: s, longEdge: 500)
+        XCTAssertLessThanOrEqual(max(square.extent.width, square.extent.height), 500)
+        XCTAssertGreaterThan(max(square.extent.width, square.extent.height), 490)
+        XCTAssertEqual(Double(square.extent.width / square.extent.height), 1, accuracy: 0.02)
+
+        let base = try ImageStats.compute(engine.pipeline.processFitting(photo, settings: DevelopSettings(), longEdge: 1024))
+        var bright = DevelopSettings()
+        bright.exposure = 2
+        let brighter = try ImageStats.compute(engine.pipeline.processFitting(photo, settings: bright, longEdge: 1024))
+        XCTAssertGreaterThan(brighter.meanLuminance, base.meanLuminance + 0.05)
+        XCTAssertGreaterThanOrEqual(brighter.highlightClipping, base.highlightClipping)
+
+        let jpeg = try PreviewEncoder.jpeg(square)
+        XCTAssertEqual(Array(jpeg.prefix(2)), [0xFF, 0xD8])
+        XCTAssertLessThan(jpeg.count, 400_000)
+    }
+}
+
+/// ExposureSolver: 明るさ・白飛びの目標から露出とハイライト回復を探す
+final class ExposureSolverTests: XCTestCase {
+    /// 露出で明るく・白飛びが増え、ハイライト回復で白飛びが減る(少し暗くなる)単純な模型
+    private func model(_ s: DevelopSettings) -> ImageStats {
+        let e = s.exposure, h = s.hdr.highlights
+        let mean = min(1, 0.3 * pow(2, e * 0.6)) * (1 - 0.15 * h)
+        let clip = max(0, 0.04 * pow(2, e) * (1 - 0.9 * h) - 0.01)
+        return ImageStats(width: 1, height: 1, meanLuminance: mean, medianLuminance: mean, p01Luminance: 0,
+                          p99Luminance: 1, highlightClipping: clip, shadowClipping: 0, meanRGB: [mean, mean, mean],
+                          histogram: [], grid: [])
+    }
+
+    func testReachesMeanLuminance() throws {
+        let r = try ExposureSolver.solve(from: DevelopSettings(), target: .init(meanLuminance: 0.45), evaluate: model)
+        XCTAssertTrue(r.luminanceMet)
+        XCTAssertEqual(r.stats.meanLuminance, 0.45, accuracy: 0.01)
+        XCTAssertGreaterThan(r.settings.exposure, 0)
+        XCTAssertLessThan(r.evaluations, 20)
+    }
+
+    func testUsesHighlightRecoveryForClipping() throws {
+        let r = try ExposureSolver.solve(from: DevelopSettings(),
+                                         target: .init(meanLuminance: 0.45, maxHighlightClipping: 0.01), evaluate: model)
+        XCTAssertTrue(r.luminanceMet, "\(r.notes)")
+        XCTAssertTrue(r.clippingMet)
+        XCTAssertGreaterThan(r.settings.hdr.highlights, 0)
+        XCTAssertLessThanOrEqual(r.stats.highlightClipping, 0.01)
+    }
+
+    /// ハイライト回復を使えないときは露出を下げて白飛びの上限を守る(明るさの目標より優先)
+    func testLowersExposureWhenRecoveryIsNotAllowed() throws {
+        let r = try ExposureSolver.solve(from: DevelopSettings(),
+                                         target: .init(meanLuminance: 0.45, maxHighlightClipping: 0.01,
+                                                       allowHighlightRecovery: false), evaluate: model)
+        XCTAssertTrue(r.clippingMet)
+        XCTAssertFalse(r.luminanceMet)
+        XCTAssertEqual(r.settings.hdr.highlights, 0)
+        XCTAssertFalse(r.notes.isEmpty)
+    }
+
+    /// 模型では露出 −3 でも平均輝度は約 0.086 なので、0.05 には下げきれない
+    func testUnreachableTargetIsReported() throws {
+        let r = try ExposureSolver.solve(from: DevelopSettings(), target: .init(meanLuminance: 0.05), evaluate: model)
+        XCTAssertFalse(r.luminanceMet)
+        XCTAssertEqual(r.settings.exposure, ExposureSolver.exposureRange.lowerBound)
+        XCTAssertTrue(r.notes.first?.contains("目標の明るさより明るい") == true, "\(r.notes)")
+    }
+
+    func testAlreadyMetNeedsOneEvaluation() throws {
+        var s = DevelopSettings()
+        s.exposure = 0
+        let r = try ExposureSolver.solve(from: s, target: .init(meanLuminance: 0.3, maxHighlightClipping: 0.05), evaluate: model)
+        XCTAssertEqual(r.evaluations, 1)
+        XCTAssertEqual(r.settings, s)
+    }
+
+    /// 実際の ARW: 前提の単調性と、暗い写真・白飛びの多い写真で目標に届くこと(RAW_SAMPLE_DIR のときだけ)
+    func testSamplePhotos() throws {
+        guard let dir = ProcessInfo.processInfo.environment["RAW_SAMPLE_DIR"] else { throw XCTSkip("RAW_SAMPLE_DIR が未設定") }
+        let engine = RAWEngine()
+        let urls = try engine.listCandidates(in: URL(fileURLWithPath: (dir as NSString).expandingTildeInPath))
+        XCTAssertFalse(urls.isEmpty)
+        for url in urls {
+            let photo = try engine.open(url)
+            func eval(_ s: DevelopSettings, _ edge: Int = 512) throws -> ImageStats {
+                try ImageStats.compute(engine.pipeline.processFitting(photo, settings: s, longEdge: edge))
+            }
+            // 単調性: 露出で明るく・白飛びが増える。ハイライト回復で白飛びが減る
+            var a = DevelopSettings(), b = DevelopSettings(), c = DevelopSettings()
+            a.exposure = -1; b.exposure = 0; c.exposure = 1
+            let (sa, sb, sc) = (try eval(a), try eval(b), try eval(c))
+            XCTAssertLessThan(sa.meanLuminance, sb.meanLuminance, url.lastPathComponent)
+            XCTAssertLessThan(sb.meanLuminance, sc.meanLuminance, url.lastPathComponent)
+            XCTAssertLessThanOrEqual(sa.highlightClipping, sb.highlightClipping + 1e-4, url.lastPathComponent)
+            var h = c
+            h.hdr.highlights = 1
+            XCTAssertLessThanOrEqual(try eval(h).highlightClipping, sc.highlightClipping + 1e-4, url.lastPathComponent)
+
+            // 目標: 平均輝度 0.45、白飛び 1% 以下。探索は長辺 512、確かめは長辺 1024(get_stats と同じ)
+            let r = try ExposureSolver.solve(from: DevelopSettings(),
+                                             target: .init(meanLuminance: 0.45, maxHighlightClipping: 0.01),
+                                             coarse: { try eval($0) }, fine: { try eval($0, ImageStats.defaultLongEdge) })
+            let check = try eval(r.settings, ImageStats.defaultLongEdge)
+            XCTAssertEqual(check, r.stats, "結果の統計は get_stats と同じ解像度")
+            XCTAssertTrue(r.clippingMet, "\(url.lastPathComponent) \(r.notes)")
+            XCTAssertLessThanOrEqual(check.highlightClipping, 0.01, url.lastPathComponent)
+            if r.luminanceMet {
+                XCTAssertEqual(check.meanLuminance, 0.45, accuracy: 0.02, url.lastPathComponent)
+            }
+            print(String(format: "  %@: 露出 %+.2f ハイライト回復 %.2f → 平均 %.3f 白飛び %.2f%% (現像 %d 回) %@",
+                         url.lastPathComponent, r.settings.exposure, r.settings.hdr.highlights,
+                         check.meanLuminance, check.highlightClipping * 100, r.evaluations, r.notes.joined()))
+        }
+    }
+}

@@ -76,14 +76,48 @@ swift run rawdev develop <フォルダ> --exposure 0.5 --hdr 0.6 --look builtin.
 swift run rawdev develop <フォルダ> --aspect 16x9 --angle 1.5 --look builtin.cinema --look-strength 0.7
 swift run rawdev develop <フォルダ> --hdr-output --format heif-hdr
 swift run rawdev looks                   # 使えるルックの一覧
+swift run rawdev params                  # 数値で調整するパラメータの範囲と説明
+swift run rawdev stats <フォルダ>         # 今の設定で現像した結果の明るさ・白飛び・色の統計
 swift run rawdev config                  # 設定ファイルの書き出し設定を表示
 swift run rawdev                         # オプションの一覧
 ```
 
 出力先と形式は、指定しなければアプリの書き出し設定に従います(未設定なら RAW と同じフォルダの `developed/`)。
 `--save` を付けると、その設定を写真のサイドカーに保存します。
+露出や彩度などの数値はアプリのスライダーと同じ範囲で受け付け、範囲の外は端の値に丸めます(`rawdev params` で確認できます)。
 
 `swift build -c release` でビルドした `.build/release/rawdev` を PATH の通った場所に置けば、`rawdev` だけで使えます。
+
+## AI に現像を任せる(MCP サーバー・試作)
+
+`rawdev mcp <フォルダ>` は、そのフォルダの写真の現像設定を AI に操作させる MCP サーバーです。
+Claude Code や Claude Desktop などの MCP クライアントに登録すると、AI が写真の一覧・撮影情報・現像結果の統計・縮小画像を見て、
+現像設定を変えられるようになります。たとえば「ISO 6400 以上の写真は輝度ノイズ除去を 0.5 に」「白飛びを抑えて」
+「全部の写真の明るさを揃えて」のように頼めます。明るさや白飛びは、AI が目標(平均輝度・白飛びの割合)を決め、
+合う露出とハイライト回復は Rawgenzo が探します。
+
+- 通信は Mac の中だけで行います(MCP クライアントが `rawdev` を起動し、標準入出力でやり取りします)。ルーターの設定は要りません
+- AI が変えられるのは現像設定(サイドカー)だけで、元の RAW は書き換えません。変更は取り消せます(AI に「取り消して」と頼む)
+- 書き出し・クロップ・ルックの選択はまだ AI からはできません
+- Rawgenzo アプリの設定(一般)で「AI からの操作を受け付ける」をオンにすると、AI の操作はアプリを通して行われます。
+  開いている写真への変更は画面にその場で反映され、変わったスライダーが少しの間強調されます。
+  アプリで人が変えた写真は、AI が取り消そうとしても取り消しません(人の変更を消さないため)
+- この設定がオフのまま、アプリで同じ写真を開いていると、アプリの自動保存が AI の変更を上書きすることがあります
+
+Claude Code に登録する例(プロジェクトの `.mcp.json`):
+
+```json
+{
+  "mcpServers": {
+    "rawgenzo": {
+      "command": "/path/to/rawdev",
+      "args": ["mcp", "/path/to/photos", "--log", "/path/to/photos/mcp-log.jsonl"]
+    }
+  }
+}
+```
+
+`--log` を付けると、道具の呼び出しごとに時間と AI に渡したデータの量を記録します。
 
 ## 設定ファイル
 

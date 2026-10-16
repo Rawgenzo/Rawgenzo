@@ -1,5 +1,7 @@
 import Foundation
 import RAWCore
+import OperationSurface
+import RawgenzoSurface
 
 // rawdev: サンプルRAWで現像エンジンを確かめるためのコマンドラインツール
 
@@ -8,6 +10,13 @@ let usage = """
   rawdev check                     このMacのCore Imageがα7S IIIに対応しているか確認
   rawdev info <ファイル|フォルダ>...   メタデータとカメラ判定結果を表示
   rawdev looks                     使えるルック(〜風フィルター)の一覧
+  rawdev params                    数値で調整するパラメータの一覧(範囲・基準値・説明)
+  rawdev mcp <フォルダ> [--log <ファイル>]
+                                   MCP サーバー(stdio)。MCP クライアント(Claude Code など)から起動して、
+                                   フォルダの写真の現像設定を AI に操作させる。--log は呼び出しごとの記録(JSON Lines)
+  rawdev stats <ファイル|フォルダ>... [--json] [--long-edge <px>] [--preview <フォルダ>]
+                                   今の設定(サイドカー)で現像した結果の明るさ・白飛び・色の統計
+                                   (--preview は AI に見せるのと同じ縮小 JPEG を書き出す)
   rawdev config                    設定ファイル (~/.Rawgenzo/config.json) の書き出し設定を表示
   rawdev name <テンプレート> <ファイル>...  ファイル名テンプレートの結果を表示(書き出さない)
   rawdev develop <ファイル|フォルダ>... [オプション]
@@ -17,12 +26,12 @@ develop のオプション:
   --name <テンプレート>    出力ファイル名 例: "{date}_{name}" (既定: 設定のテンプレート)
   --seq-start <番号>       {seq} の開始番号 (既定: 1。CLIは設定の連番を進めない)
   --format <形式>          jpeg | heif | tiff16 | heif-hdr (既定: 設定の形式)
-  --exposure <EV>          露出補正 例: 0.7
+  --exposure <EV>          露出補正 -3...3 例: 0.7
   --contrast <値>          コントラスト -1.2...1.2 (0 = そのまま。アプリの -120...+120 に当たる)
   --sharpness <値>         シャープネス 0...6 (既定 1。等倍で描くときだけ効く)
   --luma-nr <値>           輝度ノイズ除去 0...1 (既定は ISO に応じてデコーダが決める)
   --color-nr <値>          色ノイズ除去 0...2 (既定 0.5)
-  --saturation <倍率>      彩度 例: 1.2 (1 = そのまま)
+  --saturation <倍率>      彩度 0...2 例: 1.2 (1 = そのまま)
   --vibrance <値>          自然な彩度 -1...1
   --hdr <強さ>             HDR風トーン 0...1
   --highlights <値>        ハイライト回復 0...1
@@ -36,6 +45,7 @@ develop のオプション:
   --look <id>              ルック (rawdev looks で確認)
   --look-strength <値>     ルックの強さ 0...1
   --scale <倍率>           縮小して書き出し 例: 0.5
+  (数値の調整は範囲外を端に丸める。範囲はアプリのスライダーと同じ)
   --save                   この設定をサイドカーに保存
 """
 
@@ -65,6 +75,14 @@ func expand(_ paths: [String]) -> [URL] {
         return isDir.boolValue ? ((try? engine.listCandidates(in: url)) ?? []) : [url]
     }
 }
+
+/// 数値の調整オプション → ParameterCatalog の id
+let parameterOptions: [String: String] = [
+    "--exposure": "exposure", "--contrast": "contrast",
+    "--sharpness": "sharpness", "--luma-nr": "luminanceNoiseReduction", "--color-nr": "colorNoiseReduction",
+    "--saturation": "saturation", "--vibrance": "vibrance",
+    "--hdr": "hdr.strength", "--highlights": "hdr.highlights", "--shadows": "hdr.shadows",
+]
 
 func format(_ value: Double?, _ spec: String = "%.1f") -> String {
     value.map { String(format: spec, $0) } ?? "-"
@@ -130,6 +148,158 @@ case "looks":
     }
     print("\n.cube ファイルは次のフォルダに置くと追加されます:\n  \(LookRegistry.userLooksDirectory.path)")
 
+case "params":
+    for group in ParameterGroup.allCases {
+        print("■ \(group.label)")
+        for p in ParameterCatalog.parameters(in: group) {
+            let baseline: String
+            switch p.baseline {
+            case .fixed(let v): baseline = p.formatted(v)
+            case .asShotTemperature, .asShotTint: baseline = "撮影時の値"
+            default: baseline = "デコーダの既定値"
+            }
+            let unit = p.unit.map { " \($0)" } ?? ""
+            print("  \(p.id)  \(p.label)  \(p.range.lowerBound)...\(p.range.upperBound)\(unit)  基準: \(baseline)")
+            print("    \(p.summary)")
+        }
+    }
+
+case "stats":
+    var paths: [String] = []
+    var asJSON = false
+    var longEdge = ImageStats.defaultLongEdge
+    var previewDir: URL?
+    var k = 0
+    while k < arguments.count {
+        let arg = arguments[k]
+        func value() -> String {
+            k += 1
+            guard k < arguments.count else { fail("\(arg) に値がありません") }
+            return arguments[k]
+        }
+        switch arg {
+        case "--json": asJSON = true
+        case "--long-edge":
+            let raw = value()
+            guard let v = Int(raw), v >= 16 else { fail("--long-edge は 16 以上の整数です: \(raw)") }
+            longEdge = v
+        case "--preview": previewDir = URL(fileURLWithPath: (value() as NSString).expandingTildeInPath)
+        case let a where a.hasPrefix("--"): fail("未知のオプション: \(a)")
+        default: paths.append(arg)
+        }
+        k += 1
+    }
+    let urls = expand(paths)
+    if urls.isEmpty { fail("RAWファイルが見つかりません") }
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.sortedKeys]
+    for url in urls {
+        do {
+            let start = Date()
+            let photo = try engine.open(url)
+            let image = try engine.pipeline.processFitting(photo, settings: photo.settings, longEdge: longEdge)
+            let stats = try ImageStats.compute(image, maxLongEdge: longEdge)
+            let ms = Int(Date().timeIntervalSince(start) * 1000)
+            if asJSON {
+                print(String(decoding: try encoder.encode(stats), as: UTF8.self))
+            } else {
+                print("■ \(url.lastPathComponent)  (\(stats.width)×\(stats.height) で計算、\(ms)ms)")
+                print(String(format: "  輝度: 平均 %.3f  中央 %.3f  1%%点 %.3f  99%%点 %.3f",
+                             stats.meanLuminance, stats.medianLuminance, stats.p01Luminance, stats.p99Luminance))
+                print(String(format: "  白飛び %.2f%%  黒つぶれ %.2f%%  平均RGB %.3f / %.3f / %.3f",
+                             stats.highlightClipping * 100, stats.shadowClipping * 100,
+                             stats.meanRGB[0], stats.meanRGB[1], stats.meanRGB[2]))
+                let bars = " ▁▂▃▄▅▆▇█"
+                let peak = stats.histogram.max() ?? 1
+                let hist = stats.histogram.map { v -> Character in
+                    let i = peak > 0 ? Int((v / peak * 8).rounded()) : 0
+                    return bars[bars.index(bars.startIndex, offsetBy: i)]
+                }
+                print("  ヒストグラム 暗[\(String(hist))]明")
+                print("  区画ごとの明るさ(上から):")
+                for row in stats.grid {
+                    let cells = row.map { String(format: "%.2f", 0.2126 * $0[0] + 0.7152 * $0[1] + 0.0722 * $0[2]) }
+                    print("    " + cells.joined(separator: " "))
+                }
+                let json = try encoder.encode(stats)
+                print("  JSON にすると \(json.count) バイト")
+            }
+            if let dir = previewDir {
+                try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+                let out = dir.appendingPathComponent(url.deletingPathExtension().lastPathComponent + "_preview.jpg")
+                let data = try PreviewEncoder.jpeg(image)
+                try data.write(to: out)
+                if !asJSON {
+                    print("  縮小画像: \(out.path)  (\(Int(image.extent.width))×\(Int(image.extent.height))、\(data.count / 1024) KB)")
+                }
+            }
+        } catch {
+            FileHandle.standardError.write("✗ \(url.lastPathComponent): \(error)\n".data(using: .utf8)!)
+        }
+    }
+
+case "mcp":
+    // 標準出力は MCP のメッセージ専用。ここでは print を使わない(説明・エラーは標準エラーへ)
+    func logError(_ s: String) { FileHandle.standardError.write(Data((s + "\n").utf8)) }
+    var folderPath: String?
+    var logURL: URL?
+    var k = 0
+    while k < arguments.count {
+        switch arguments[k] {
+        case "--log":
+            k += 1
+            guard k < arguments.count else { fail("--log に値がありません") }
+            logURL = URL(fileURLWithPath: (arguments[k] as NSString).expandingTildeInPath)
+        case let a where a.hasPrefix("--"): fail("未知のオプション: \(a)")
+        default: folderPath = arguments[k]
+        }
+        k += 1
+    }
+    guard let folderPath else { fail("写真のフォルダを指定してください 例: rawdev mcp ~/Pictures/trip") }
+    let folder = URL(fileURLWithPath: (folderPath as NSString).expandingTildeInPath, isDirectory: true)
+    var isDir: ObjCBool = false
+    guard FileManager.default.fileExists(atPath: folder.path, isDirectory: &isDir), isDir.boolValue else {
+        fail("フォルダが見つかりません: \(folder.path)")
+    }
+    var logHandle: FileHandle?
+    if let logURL {
+        if !FileManager.default.fileExists(atPath: logURL.path) {
+            FileManager.default.createFile(atPath: logURL.path, contents: nil)
+        }
+        logHandle = try? FileHandle(forWritingTo: logURL)
+        _ = try? logHandle?.seekToEnd()
+    }
+    let iso = ISO8601DateFormatter()
+    let logLock = NSLock()
+    func logCall(_ r: MCPServer.CallRecord, via: String) {
+        // 画像のトークン数は「幅×高さ÷750」の目安(実際の値はモデルによって違う)
+        let imageTokens = r.images.reduce(0) { $0 + $1.width * $1.height / 750 }
+        let entry: JSONValue = [
+            "date": .string(iso.string(from: Date())), "tool": .string(r.tool), "is_error": .bool(r.isError),
+            "duration_ms": .number(Double(r.durationMs)), "text_bytes": .number(Double(r.textBytes)),
+            "images": .array(r.images.map { [.number(Double($0.width)), .number(Double($0.height)), .number(Double($0.bytes))] }),
+            "image_tokens_estimate": .number(Double(imageTokens)),
+            "arguments": r.arguments, "summary": .string(r.summary), "via": .string(via),
+        ]
+        logLock.lock(); defer { logLock.unlock() }
+        logHandle?.write(Data((entry.jsonString() + "\n").utf8))
+        logError("[rawgenzo] \(r.tool) \(r.isError ? "失敗" : "成功") \(r.durationMs)ms 文字 \(r.textBytes)B 画像 \(r.images.count) 枚(\(via))")
+    }
+
+    // 道具を呼ぶたびに、Rawgenzo アプリが AI からの操作を受け付けているかを確かめ、受け付けていればアプリに中継する
+    // (AI の変更がアプリの画面にその場で出て、アプリの自動保存が上書きしない)。受け付けていなければ自分で処理する。
+    // 会話の途中でアプリを起動・終了しても切り替わる
+    let surface = RawgenzoTools.makeSurface(workspace: RawgenzoWorkspace(folder: folder, engine: engine))
+    let server = MCPServer(surface: surface)
+    server.onToolCall = { logCall($0, via: "rawdev") }
+    let router = MCPRouter(local: server, preamble: [RawgenzoBridge.handshake(folder: folder)]) {
+        UnixSocketBridge.connect(path: RawgenzoBridge.socketPath)
+    }
+    router.onRemoteToolCall = { logCall($0, via: "app") }
+    router.onSwitch = { logError("[rawgenzo] \($0)") }
+    logError("[rawgenzo] MCP サーバーを開始: \(folder.path)(\((try? engine.listCandidates(in: folder).count) ?? 0) 枚)")
+    router.run()
+
 case "config":
     let path = RawgenzoPaths.configFile.path
     let exists = FileManager.default.fileExists(atPath: path)
@@ -192,16 +362,15 @@ case "develop":
         case "--seq-start": sequence = Int(number())
         case "--scale": scale = number()
         case "--save": save = true
-        case "--exposure": let v = number(); edits.append { s, _ in s.exposure = v }
-        case "--contrast": let v = number(); edits.append { s, _ in s.contrast = v }
-        case "--sharpness": let v = number(); edits.append { s, _ in s.sharpness = v }
-        case "--luma-nr": let v = number(); edits.append { s, _ in s.luminanceNoiseReduction = v }
-        case "--color-nr": let v = number(); edits.append { s, _ in s.colorNoiseReduction = v }
-        case "--saturation": let v = number(); edits.append { s, _ in s.saturation = v }
-        case "--vibrance": let v = number(); edits.append { s, _ in s.vibrance = v }
-        case "--hdr": let v = number(); edits.append { s, _ in s.hdr.strength = v }
-        case "--highlights": let v = number(); edits.append { s, _ in s.hdr.highlights = v }
-        case "--shadows": let v = number(); edits.append { s, _ in s.hdr.shadows = v }
+        case let flag where parameterOptions[flag] != nil:
+            // 範囲は ParameterCatalog(アプリのスライダーと同じ)。範囲外は端に丸めて知らせる
+            let p = ParameterCatalog[parameterOptions[flag]!]
+            let v = number()
+            let clamped = p.clamp(v)
+            if clamped != v {
+                print("\(flag) \(v) は範囲 \(p.range.lowerBound)...\(p.range.upperBound) の外なので \(clamped) にします")
+            }
+            edits.append { s, _ in p.set(clamped, in: &s) }
         case "--hdr-output": edits.append { s, _ in s.hdr.extendedOutput = true }
         case "--crop":
             cropEdited = true

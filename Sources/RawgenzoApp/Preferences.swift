@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import RAWCore
+import RawgenzoSurface
 
 enum ThumbnailSize: String, CaseIterable, Identifiable, Codable {
     case small, medium, large
@@ -52,6 +53,7 @@ struct GeneralSettingsView: View {
                     .foregroundStyle(.secondary)
             }
             GuideSettingsSection(display: $prefs.config.guides)
+            AgentSettingsSection()
             ConfigFileSection()
         }
         .formStyle(.grouped)
@@ -77,6 +79,32 @@ struct ConfigFileSection: View {
             }
             if let notice = prefs.notice {
                 Text(notice).font(.caption).foregroundStyle(.orange)
+            }
+        }
+    }
+}
+
+/// AI(MCP の中継 rawdev mcp)からの操作の受け付け
+struct AgentSettingsSection: View {
+    @EnvironmentObject private var prefs: AppConfigStore
+    @EnvironmentObject private var model: EditorModel
+
+    var body: some View {
+        Section("AI からの操作") {
+            Toggle("AI からの操作を受け付ける", isOn: $prefs.config.agent.enabled)
+            LabeledContent("状態") {
+                Text(model.agentStatus).foregroundStyle(.secondary)
+            }
+            Text("オンにすると、MCP クライアント(Claude Code など)に登録した rawdev mcp が、このアプリを通して現像設定を変えます。"
+                 + "AI の変更は画面にその場で反映され、変わったスライダーが一時的に強調されます。"
+                 + "オンの間は、同じユーザーの他のプログラムも現像設定を変えられます。")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            LabeledContent("受け口") {
+                Text(RawgenzoBridge.socketPath.replacingOccurrences(of: NSHomeDirectory(), with: "~"))
+                    .textSelection(.enabled)
+                    .foregroundStyle(.secondary)
             }
         }
     }

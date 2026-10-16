@@ -33,6 +33,9 @@ swift run rawdev develop RAWsample --hdr 0.5 --look builtin.film
 swift run rawdev name "{date}_{seq:3}" RAWsample   # ファイル名テンプレートの確認(書き出さない)
 swift run rawdev config                      # 設定ファイルの書き出し設定を表示
 swift run rawdev looks                       # ルック一覧
+swift run rawdev params                      # 数値パラメータの一覧(ParameterCatalog)
+swift run rawdev stats RAWsample --preview /tmp/p   # 現像結果の統計(ImageStats)と AI に見せる縮小 JPEG
+swift run rawdev mcp AItrial --log AItrial/mcp-log.jsonl   # MCP サーバー(stdio)。普段は MCP クライアントが起動する
 ```
 
 - サンプル RAW は `RAWsample/`(α7S III の ARW)。`.gitignore` 済みなのでコミットしない
@@ -53,11 +56,27 @@ Sources/RAWCore/            現像エンジン。UI 非依存(SwiftUI を import
   Look/                     Look、LookRegistry、BuiltInLooks、ColorCubeLook、CubeFileLook(.cube)
   Composition/              構図ガイドの幾何計算(CompositionGuide)
   Config/                   RawgenzoPaths、ExportPreferences、FileNameTemplate、SharedConfig
-  Model/                    DevelopSettings(現像パラメータ)、CropFitting(枠を回転後の画像に収める計算)、
+  Model/                    DevelopSettings(現像パラメータ)、ParameterCatalog(数値パラメータの範囲・基準値・説明)、CropFitting(枠を回転後の画像に収める計算)、
                             PreviewZoom(表示倍率の計算)、RAWMetadata、RAWError
+  Observe/                  ImageStats(現像結果の数値の観測: 輝度・白飛び・ヒストグラム・8×8 区画)、
+                            DevelopPipeline.processFitting(長辺を指定して縮小現像)、PreviewEncoder(縮小 JPEG)、
+                            ExposureSolver(明るさ・白飛びの目標から露出とハイライト回復を二分法で探す)
   Sidecar/                  SidecarStore(<RAW名>.rawgenzo.json)
   Export/                   Exporter(JPEG / HEIF / 16bit TIFF / HDR HEIF)
   Photo.swift               Photo と RAWEngine(アプリ・CLI の窓口)
+Sources/OperationSurface/   AI などに操作を委ねる汎用の操作面(Foundation だけに依存。RAWCore も import しない)
+  JSONValue / JSONSchema    道具の引数・結果の JSON と、入力の形(AI への説明と検証を兼ねる)
+  Tool                      Effect(影響の段階)、ToolDescriptor、ToolResult、Caller、ToolContext(取り消しの登録)
+  Surface                   道具の登録と呼び出し(検証 → 権限 → 実行 → 監査ログ)、主体ごとの取り消し、汎用の道具(undo 等)
+  MCPServer                 操作面を MCP サーバー(stdio の JSON-RPC。tools だけ)として公開する。Foundation だけで自作
+  UnixSocket                起動中のアプリの操作面に別プロセスからつなぐ Unix ソケット(0600)
+  MCPRouter                 MCP のメッセージを、起動中のアプリ(ソケットの先)か自分の操作面かに、メッセージごとに振り分ける
+Sources/RawgenzoSurface/    Rawgenzo の領域定義(RAWCore と OperationSurface を使う)
+  RawgenzoWorkspace         作業フォルダと写真(ID = フォルダ内のファイル名。フォルダの外は指せない)
+  RawgenzoTools             道具: list_photos / get_photo / get_stats / get_preview / adjust / solve_exposure
+                            (+ undo / recent_operations)
+  RawgenzoAgentHost         アプリの中でソケット(~/.Rawgenzo/agent.sock)を受け、作業フォルダごとの操作面につなぐ。
+                            RawgenzoBridge(中継との決まり: 最初の通知 rawgenzo/workspace で作業フォルダを知らせる)
 Sources/RawgenzoApp/        SwiftUI アプリ
   RawgenzoApp.swift         App、メニュー、AppDelegate
   AboutPanel.swift          「Rawgenzo について」(作者・公式ページ・ライセンス)
@@ -71,8 +90,11 @@ Sources/RawgenzoApp/        SwiftUI アプリ
   ExportSettingsView.swift  設定の「書き出し」タブ(テンプレート編集)
   Preferences.swift         設定ウインドウ(一般タブ)、ThumbnailSize
   ThumbnailCache.swift      埋め込みプレビューからのサムネイル
+  AgentLink.swift           AI の操作の受け口(LiveEditing の実装。操作面のキューからメインに移って EditorModel に触る)
 Sources/rawdev/main.swift   CLI
 Tests/RAWCoreTests/         RAWCore のテスト(1ファイル)
+Tests/OperationSurfaceTests/ OperationSurface のテスト
+Tests/RawgenzoSurfaceTests/  RawgenzoSurface のテスト(実サンプルは一時フォルダに写して使う。サンプルのフォルダにサイドカーを書かない)
 scripts/make-app.sh         .app 化・アドホック署名・インストール
 scripts/make_icon.py        アイコン生成(Pillow + numpy)
 Resources/AppIcon.png       アプリアイコン(1024px)
@@ -98,6 +120,7 @@ ARW → CameraRegistry が機種判定 → CameraProfile.makeSource → RAWSourc
 | `<RAW>.rawgenzo.json` | その写真の現像設定(DevelopSettings) | アプリ(自動保存)、CLI(`--save` 時) |
 | `~/.Rawgenzo/config.json` | アプリ設定(AppConfig) | アプリのみ |
 | `~/.Rawgenzo/Looks/*.cube` | ユーザーのルック | オーナーが手で置く |
+| `~/.Rawgenzo/agent.sock` | AI からの操作の受け口(ソケット。設定でオンのときだけ) | アプリ(終了時に消す) |
 
 - `config.json` の `"export"` は CLI も `SharedConfig` で**読む**(書かない)
 
@@ -125,6 +148,49 @@ ARW → CameraRegistry が機種判定 → CameraProfile.makeSource → RAWSourc
 - `swift-tools-version: 5.9` のまま(言語モードは Swift 5 で、厳格な並行性チェックは無効)。要件は Swift 6.4 だが、
   tools-version を 6 以上に上げると言語モードが Swift 6 になり厳格なチェックが有効になるので、上げるのは Swift 6 モードへの
   移行(未着手)と一緒に行う
+
+### 操作面(OperationSurface)
+
+- 汎用部分なので Rawgenzo 固有のこと(写真・現像設定)を持ち込まない。他のソフトでも使える形を保つ
+- `Surface` は 1 スレッド(直列キュー)からだけ使う。道具の処理が RAWSource に触ることがあるため
+- 取り消しは「変える前の値に戻す」方式。`registerUndo` には変えた対象(写真のパスなど)を渡す。
+  後から別の主体が同じ対象を変えていたら取り消しを断る(戻すと他人の変更まで消えるため。最初の版はこれを見落としていた)
+- 状態を変える道具(modify 以上)には、`Surface.register` が作業名の引数 `task` を自動で足す(道具の処理には渡さない)。
+  undo は最後の作業(同じ task の取引すべて)をまとめて戻す。MCP では人の 1 回の指示の区切りが伝わらないので、
+  AI に作業名を付けさせる(2026-10-16 の試験で、1 つの指示が 2 つの取引に分かれ「今の変更を取り消して」が半分しか戻らなかった)。
+  作業単位で戻すときも、後から取り消さない取引(別の主体・自分の別の作業)が同じ対象を変えていたら断る
+- 汎用の操作の決まり(`Surface.standardGuidance`: 作業名の付け方、頼まれていない項目を変えない、届かない目標は人に判断を仰ぐ)は
+  `fullInstructions` で AI への説明に付け足す。ソフト固有の説明(`instructions`)には書かない
+- 失敗は例外ではなく `ToolResult.error` で返す(AI に理由を読ませてやり直させるため)
+- 道具の一覧は登録順で返す(AI 側のプロンプトキャッシュを効かせるため。並びを毎回変えない)
+- **アプリとの橋渡し**: 設定「AI からの操作を受け付ける」(config.json の `agent.enabled`、既定オフ)がオンだと、
+  アプリが `~/.Rawgenzo/agent.sock` で受け付け、`rawdev mcp` はそこへ中継する(つながらなければ自分で処理)。
+  つながるかはメッセージのたびに確かめる(`MCPRouter`)。最初の版は起動時に 1 回だけ確かめていて、AI の会話の途中でアプリを
+  起動しても中継に切り替わらなかった。アプリに切り替えたときは initialize を送り直す。要求を送った後で接続が切れたら、
+  その要求は失敗として返し、自分で処理し直さない(アプリが処理済みなら二重に当たるため)。
+  取り消しの履歴はアプリと rawdev とで別々なので、切り替える前の変更は切り替えた後には取り消せない
+  アプリで開いている写真は、AI が編集中の設定(未保存の変更を含む)を読み書きし、画面にその場で出る。
+  AI の変更は `photo.settings` も同じ値にして「保存済み」として扱う(サイドカーは AI の側が書く)ので、アプリの自動保存が書き直さない。
+  人の変更は `flushSave` で実際に保存したときだけ `noteHumanChange` で記録する(AI の取り消しを断る判断に使う)
+- 操作面のキューからメインへは `DispatchQueue.main.sync` で移る。**メインスレッドから操作面のキューを待たない**こと
+  (人の変更の記録は queue.async で渡している)。待つと行き詰まる
+- 写真が「開いている写真」かはパスの文字列(standardizedFileURL)で比べる。シンボリックリンクの先は見ないので、
+  AItrial(リンク)と RAWsample(実体)を別々に開くと別の写真として扱われ、サイドカーも別になる
+- `rawdev mcp` の標準出力は MCP のメッセージ専用。**print を使わない**(説明・ログは標準エラーへ)。
+  RAWCore など下のライブラリも標準出力に書かないこと
+- 道具の一覧は会話のたびに AI に送られる。同じ長い説明を複数の道具に載せない(項目の説明は adjust にだけ載せている)
+- テストで実際のソケットのパスを使わないよう、`RAWGENZO_AGENT_SOCKET` で変えられる
+- 試すときは `AItrial/`(サンプルへのシンボリックリンク。サイドカーはこのフォルダに書かれる)と、
+  手元の `.mcp.json` を使う。どちらも .gitignore 済み(`.mcp.json` は手元の絶対パスを含むので公開しない)
+- **目標で指示する道具を優先する**。2026-10-16 の試験では、AI が「値を変えて get_stats で見る」を繰り返し
+  (明るさを揃える指示で 17 回)、人のスライダー操作を数値でなぞった。solve_exposure(目標を渡すとアプリが探す)で 1 回になった。
+  探索は長辺 512 で粗く、長辺 1024(get_stats と同じ)で仕上げる。白飛びの割合は解像度で変わるので、512 だけだと
+  AI が get_stats で確かめたとき目標を超えていることがある(実サンプルで 1.25% になった)
+- 1 回の指示は 1 回の呼び出し・1 つの取引にまとめられるようにする(写真ごとに違う変更でも。adjust の edits)。
+  試験では写真ごとに adjust が 4 回呼ばれ、取り消しに undo が 4 回要った
+- Rawgenzo の道具(`RawgenzoTools`)の入力の形・説明は `ParameterCatalog` から作る。道具の結果の JSON のキーは snake_case にそろえる
+- `RawgenzoWorkspace` は写真を開くたびにサイドカーを読み直す(アプリや CLI が書き換えているかもしれないため)。
+  ただし**アプリが同じ写真を開いていると、アプリの自動保存が AI の変更を上書きする**(アプリとの橋渡しは未実装)
 
 ### はまりどころ(過去に実際に起きたもの・起きかけたもの)
 
@@ -196,6 +262,9 @@ ARW → CameraRegistry が機種判定 → CameraProfile.makeSource → RAWSourc
   黄金三角形用の `flipTriangle`)、アプリ側の `GuideDisplay`(保存項目)とメニューにも追加する
 - **処理段**: `DevelopStage` を実装し、適切な `phase` を付けて `DevelopPipeline.makeDefault` に追加。
   パラメータは `DevelopSettings` に足す(互換性の決まりに従う)
+- **数値パラメータ**: `DevelopSettings` に足したら `ParameterCatalog.all` にも記述を足す。範囲・基準値(↶ の戻り先)・表示の書式・説明は
+  ここが唯一の置き場で、調整パネルのスライダー・CLI の範囲チェック・(今後の)AI の道具の説明はここから作る。
+  説明文(summary)には画面を見ても分からない注意(効く条件・効く向き)を書く。AI はこれを頼りに操作する
 - **テンプレート変数**: `FileNameTemplate.variables` と `value(_:_:_:)` の両方に追加し、README の表も更新
 
 新しい機能には RAWCore 側のテストを付ける。幾何計算や文字列処理のように見た目で確かめにくいものほど数値で検証する。

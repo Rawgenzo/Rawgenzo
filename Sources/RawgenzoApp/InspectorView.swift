@@ -12,8 +12,8 @@ struct InspectorView: View {
                     header(photo)
                     basicSection(photo)
                     lensSection(photo)
-                    hdrSection
-                    colorSection
+                    hdrSection(photo)
+                    colorSection(photo)
                     detailSection(photo)
                     cropSection(photo)
                     lookSection
@@ -43,31 +43,13 @@ struct InspectorView: View {
 
     private func basicSection(_ photo: Photo) -> some View {
         InspectorSection("基本", id: .basic) {
-            AdjustSlider("露出", value: $model.settings.exposure, range: -3...3,
-                         neutral: 0, format: "%+.2f EV")
-            AdjustSlider("コントラスト", value: $model.settings.contrast, range: ContrastCurve.range,
-                         neutral: 0, format: "%+.0f", displayScale: 100)
-            AdjustSlider("色温度", value: Binding(
-                get: { model.settings.temperature ?? photo.source.asShot.temperature },
-                set: { model.settings.temperature = $0 }),
-                range: 2000...12000, neutral: photo.source.asShot.temperature, format: "%.0f K",
-                onReset: { model.settings.temperature = nil })
-            AdjustSlider("色かぶり", value: Binding(
-                get: { model.settings.tint ?? photo.source.asShot.tint },
-                set: { model.settings.tint = $0 }),
-                range: -150...150, neutral: photo.source.asShot.tint, format: "%+.0f",
-                onReset: { model.settings.tint = nil })
+            parameterSliders(.basic, photo)
         }
     }
 
-    private var hdrSection: some View {
+    private func hdrSection(_ photo: Photo) -> some View {
         InspectorSection("HDR", id: .hdr) {
-            AdjustSlider("HDRの強さ", value: $model.settings.hdr.strength, range: 0...1,
-                         neutral: 0, format: "%.2f")
-            AdjustSlider("ハイライト回復", value: $model.settings.hdr.highlights, range: 0...1,
-                         neutral: 0, format: "%.2f")
-            AdjustSlider("シャドウ持ち上げ", value: $model.settings.hdr.shadows, range: 0...1,
-                         neutral: 0, format: "%.2f")
+            parameterSliders(.hdr, photo)
             Toggle("HDRディスプレイ向けに出力", isOn: $model.settings.hdr.extendedOutput)
             if model.settings.hdr.extendedOutput {
                 Text("書き出しは10bit HEIFになります。プレビューは通常の明るさで表示されます。")
@@ -76,41 +58,42 @@ struct InspectorView: View {
         }
     }
 
-    private var colorSection: some View {
+    private func colorSection(_ photo: Photo) -> some View {
         InspectorSection("色", id: .color) {
-            AdjustSlider("彩度", value: $model.settings.saturation, range: 0...2,
-                         neutral: 1, format: "%.2f")
-            AdjustSlider("自然な彩度", value: $model.settings.vibrance, range: -1...1,
-                         neutral: 0, format: "%+.2f")
+            parameterSliders(.color, photo)
         }
     }
 
-    /// シャープネス・ノイズ除去(デコーダの機能。nil = デコーダ既定値)。範囲はオーナーの希望で広げてある
-    /// (輝度ノイズ除去だけは 1 を超えると効き方が逆になるので 0...1)
+    /// シャープネス・ノイズ除去(デコーダの機能。nil = デコーダ既定値)。範囲は ParameterCatalog / DetailRanges
     private func detailSection(_ photo: Photo) -> some View {
-        let d = photo.source.detailDefaults
-        return InspectorSection("ディテール", id: .detail) {
-            AdjustSlider("シャープネス", value: Binding(
-                get: { model.settings.sharpness ?? d.sharpness },
-                set: { model.settings.sharpness = $0 }),
-                range: DetailRanges.sharpness, neutral: d.sharpness, format: "%.0f", displayScale: 100,
-                onReset: { model.settings.sharpness = nil })
+        InspectorSection("ディテール", id: .detail) {
+            parameterSlider(ParameterCatalog["sharpness"], photo)
             Text("シャープネスは拡大表示(⌘0 など)と書き出しで効きます。ウインドウに合わせた表示では変わりません")
                 .font(.caption).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-            AdjustSlider("輝度ノイズ除去", value: Binding(
-                get: { model.settings.luminanceNoiseReduction ?? d.luminanceNoiseReduction },
-                set: { model.settings.luminanceNoiseReduction = $0 }),
-                range: DetailRanges.luminanceNoiseReduction, neutral: d.luminanceNoiseReduction,
-                format: "%.0f", displayScale: 100,
-                onReset: { model.settings.luminanceNoiseReduction = nil })
-            AdjustSlider("色ノイズ除去", value: Binding(
-                get: { model.settings.colorNoiseReduction ?? d.colorNoiseReduction },
-                set: { model.settings.colorNoiseReduction = $0 }),
-                range: DetailRanges.colorNoiseReduction, neutral: d.colorNoiseReduction,
-                format: "%.0f", displayScale: 100,
-                onReset: { model.settings.colorNoiseReduction = nil })
+            parameterSlider(ParameterCatalog["luminanceNoiseReduction"], photo)
+            parameterSlider(ParameterCatalog["colorNoiseReduction"], photo)
         }
+    }
+
+    /// まとまりのスライダーをカタログの順に並べる
+    private func parameterSliders(_ group: ParameterGroup, _ photo: Photo) -> some View {
+        ForEach(ParameterCatalog.parameters(in: group), id: \.id) { p in
+            parameterSlider(p, photo)
+        }
+    }
+
+    /// カタログの記述からスライダーを作る(範囲・基準値・表示の書式はカタログが持つ)。
+    /// AI が直前に変えた項目は、数秒だけ背景に色を付ける
+    private func parameterSlider(_ p: ParameterDescriptor, _ photo: Photo) -> some View {
+        let context = photo.parameterContext
+        return AdjustSlider(p.label, value: Binding(
+            get: { p.value(model.settings, context: context) },
+            set: { p.set($0, in: &model.settings) }),
+            range: p.range, neutral: p.baselineValue(in: context), format: p.displayFormat,
+            displayScale: p.displayScale,
+            onReset: { p.reset(&model.settings) })
+        .modifier(AgentHighlight(isOn: model.agentHighlights.contains(p.id)))
     }
 
     /// レンズ補正。サイドカーで指定が無ければ撮影時のカメラ設定に従う(チェックを触るとこの写真用の設定になる)
@@ -163,7 +146,7 @@ struct InspectorView: View {
             AdjustSlider("傾き補正", value: Binding(
                 get: { model.settings.crop?.angle ?? 0 },
                 set: { model.setTiltAngle($0) }),
-                range: -15...15, neutral: 0, format: "%+.1f°")
+                range: CropSettings.angleRange, neutral: 0, format: "%+.1f°")
 
             Button("収まる最大まで広げる") {
                 model.maximizeCrop()
@@ -325,5 +308,22 @@ struct AdjustSlider: View {
 
     private func reset() {
         if let onReset { onReset() } else { value = neutral }
+    }
+}
+
+/// AI が変えた項目の強調(背景に薄くアクセントカラー)
+struct AgentHighlight: ViewModifier {
+    let isOn: Bool
+
+    func body(content: Content) -> some View {
+        content
+            .padding(.horizontal, 6)
+            .padding(.vertical, 3)
+            .background(RoundedRectangle(cornerRadius: 6)
+                .fill(Color.accentColor.opacity(isOn ? 0.18 : 0)))
+            .padding(.horizontal, -6)
+            .padding(.vertical, -3)
+            .animation(.easeInOut(duration: isOn ? 0.15 : 0.8), value: isOn)
+            .help(isOn ? "AI が変更しました" : "")
     }
 }

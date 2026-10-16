@@ -40,6 +40,9 @@ struct ContentView: View {
         .onChange(of: model.selection) { url in
             model.open(url)
         }
+        .onChange(of: prefs.config.agent.enabled) { _ in
+            model.updateAgentHosting()
+        }
         .alert("エラー", isPresented: Binding(
             get: { model.errorMessage != nil },
             set: { if !$0 { model.errorMessage = nil } })
@@ -198,7 +201,42 @@ struct PreviewView: View {
                 .allowsHitTesting(false)
             }
             ExportNotice()
+            AgentNotice()
         }
+    }
+}
+
+/// AI の操作の知らせ(プレビュー上部)。数秒で消える
+struct AgentNotice: View {
+    @EnvironmentObject private var model: EditorModel
+
+    var body: some View {
+        VStack {
+            if let a = model.agentActivity {
+                HStack(spacing: 8) {
+                    Image(systemName: "sparkles").foregroundStyle(Color.accentColor)
+                    Text(a.message).lineLimit(1).truncationMode(.middle)
+                    Button { model.dismissAgentActivity() } label: {
+                        Image(systemName: "xmark")
+                    }
+                    .buttonStyle(.borderless)
+                    .help("閉じる")
+                }
+                .font(.callout)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
+                .background(.regularMaterial, in: Capsule())
+                .shadow(radius: 4, y: 1)
+                .padding(.top, 16)
+                .transition(.move(edge: .top).combined(with: .opacity))
+                .task(id: a) {
+                    try? await Task.sleep(nanoseconds: 5_000_000_000)
+                    if model.agentActivity == a { model.dismissAgentActivity() }
+                }
+            }
+            Spacer()
+        }
+        .animation(.easeOut(duration: 0.2), value: model.agentActivity)
     }
 }
 
