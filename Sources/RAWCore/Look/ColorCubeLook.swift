@@ -10,16 +10,18 @@ public final class ColorCubeLook: Look {
 
     public let id: String
     public let displayName: String
+    public let summary: String?
     private let cubeSize: Int
     private let transform: Transform
     /// LUT適用後に追加で掛ける処理(周辺減光など)
     private let finish: ((CIImage) -> CIImage)?
     private lazy var cubeData: Data = ColorCubeLook.makeCube(size: cubeSize, transform)
 
-    public init(id: String, displayName: String, cubeSize: Int = 32,
+    public init(id: String, displayName: String, summary: String? = nil, cubeSize: Int = 32,
                 transform: @escaping Transform, finish: ((CIImage) -> CIImage)? = nil) {
         self.id = id
         self.displayName = displayName
+        self.summary = summary
         self.cubeSize = cubeSize
         self.transform = transform
         self.finish = finish

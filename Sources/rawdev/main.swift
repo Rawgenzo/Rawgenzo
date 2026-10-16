@@ -144,7 +144,7 @@ case "info":
 
 case "looks":
     for look in engine.looks.all {
-        print("\(look.id)\t\(look.displayName)")
+        print("\(look.id)\t\(look.displayName)" + (look.summary.map { "\t\($0)" } ?? ""))
     }
     print("\n.cube ファイルは次のフォルダに置くと追加されます:\n  \(LookRegistry.userLooksDirectory.path)")
 

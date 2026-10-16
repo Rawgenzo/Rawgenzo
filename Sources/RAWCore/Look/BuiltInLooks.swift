@@ -8,7 +8,9 @@ public enum BuiltInLooks {
     public static var all: [Look] { [film, cinema, mono, nostalgic] }
 
     /// フィルム風: 黒が少し浮いた柔らかいコントラスト、わずかに暖色、彩度控えめ
-    public static let film = ColorCubeLook(id: "builtin.film", displayName: "フィルム風") { c in
+    public static let film = ColorCubeLook(
+        id: "builtin.film", displayName: "フィルム風",
+        summary: "黒が少し浮いた柔らかいコントラスト。わずかに暖色で、彩度は控えめ") { c in
         var o = ColorMath.sCurve(c, 0.35)
         o = ColorMath.fade(o, black: 0.04, white: 0.97)
         o *= SIMD3(1.03, 1.0, 0.95)
@@ -16,7 +18,9 @@ public enum BuiltInLooks {
     }
 
     /// シネマ風: 暗部を青緑、明部をオレンジに寄せる (ティール&オレンジ)
-    public static let cinema = ColorCubeLook(id: "builtin.cinema", displayName: "シネマ風") { c in
+    public static let cinema = ColorCubeLook(
+        id: "builtin.cinema", displayName: "シネマ風",
+        summary: "暗部を青緑、明部をオレンジに寄せる(ティール&オレンジ)。コントラストやや強め、彩度わずかに控えめ") { c in
         let l = ColorMath.luminance(c)
         var o = c
         o += SIMD3(-0.05, 0.015, 0.06) * (1 - l)   // 暗部 → ティール
@@ -26,7 +30,9 @@ public enum BuiltInLooks {
     }
 
     /// モノクロ: 赤フィルター寄りの白黒(空が締まり、肌が明るい)
-    public static let mono = ColorCubeLook(id: "builtin.mono", displayName: "モノクロ") { c in
+    public static let mono = ColorCubeLook(
+        id: "builtin.mono", displayName: "モノクロ",
+        summary: "赤フィルター寄りの白黒(空が締まり、肌が明るい)。コントラストやや強め") { c in
         let l = simd_dot(c, SIMD3<Float>(0.45, 0.42, 0.13))
         return SIMD3(repeating: ColorMath.sCurve(l, 0.4))
     }
@@ -34,6 +40,7 @@ public enum BuiltInLooks {
     /// ノスタルジック: 暖色で色褪せた雰囲気 + 周辺減光
     public static let nostalgic = ColorCubeLook(
         id: "builtin.nostalgic", displayName: "ノスタルジック",
+        summary: "暖色で色褪せた雰囲気(黒が浮き、白が沈む。彩度は低め)に、周辺減光を加える",
         transform: { c in
             var o = c * SIMD3(1.06, 1.0, 0.86)
             o = ColorMath.fade(o, black: 0.07, white: 0.94)

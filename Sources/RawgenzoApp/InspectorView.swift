@@ -185,11 +185,13 @@ struct InspectorView: View {
                     }
                 }
             }
+            .modifier(AgentHighlight(isOn: model.agentHighlights.contains("look.style")))
             if model.settings.look != nil {
                 AdjustSlider("強さ", value: Binding(
                     get: { model.settings.look?.strength ?? 1 },
                     set: { model.settings.look?.strength = $0 }),
                     range: 0...1, neutral: 1, format: "%.0f%%", displayScale: 100)
+                    .modifier(AgentHighlight(isOn: model.agentHighlights.contains("look.strength")))
             }
         }
     }
