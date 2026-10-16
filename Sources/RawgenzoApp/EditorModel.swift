@@ -432,7 +432,13 @@ final class EditorModel: ObservableObject {
     func applyAgentSettings(_ new: DevelopSettings, for url: URL, origin: ChangeOrigin?) -> Bool {
         guard isOpen(url), let photo else { return false }
         var changed = Set(ParameterCatalog.all.filter { $0.storedValue(settings) != $0.storedValue(new) }.map(\.id))
-        if settings.crop != new.crop { changed.insert("crop") }
+        // 切り抜きは、変わった部分の欄だけを強調する(枠だけ変えたのに傾き補正まで光ると、値が変わったように見える)
+        let (oldCrop, newCrop) = (settings.crop ?? .full, new.crop ?? .full)
+        if (oldCrop.x, oldCrop.y, oldCrop.width, oldCrop.height) != (newCrop.x, newCrop.y, newCrop.width, newCrop.height) {
+            changed.insert("crop.frame")
+        }
+        if oldCrop.aspect != newCrop.aspect { changed.insert("crop.aspect") }
+        if oldCrop.angle != newCrop.angle { changed.insert("crop.angle") }
         if settings.look != new.look { changed.insert("look") }
         if settings.lens != new.lens { changed.insert("lens") }
         if settings.hdr.extendedOutput != new.hdr.extendedOutput { changed.insert("hdr.extendedOutput") }
@@ -475,6 +481,7 @@ final class EditorModel: ObservableObject {
         case "get_preview": what = "縮小画像を見ています"
         case "recent_operations": what = "操作の履歴を見ています"
         case "undo": what = "変更を取り消しました"
+        case "set_crop": what = "\(task)切り抜きを変更しました"
         default: what = "\(task)写真を変更しました"
         }
         agentActivity = AgentActivity(message: "AI(\(who))が\(what)\(r.isError ? "(失敗)" : "")", date: Date())

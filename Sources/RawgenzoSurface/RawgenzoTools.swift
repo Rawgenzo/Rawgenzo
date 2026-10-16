@@ -12,11 +12,13 @@ public enum RawgenzoTools {
 
         進め方の目安:
         - 「この写真」「今開いている写真」と言われたら、get_app_state でユーザがアプリで見ている写真を確かめる
-        - list_photos で写真とメタデータ(ISO・レンズ・撮影日時など)を見る。条件で絞り込める
+        - list_photos で写真とメタデータ(ISO・レンズ・撮影日時など)を見る。条件で絞り込める。
+          作業フォルダ以外のフォルダも folder(絶対パス)で見られ、その写真は絶対パスの ID で指す
         - get_photo で今の設定を見る
         - 明るさや色の判断は、まず get_stats(数値。安い)で行う。画像が要るときだけ get_preview を使う(画像はトークンを多く使う)
         - 明るさを目標に合わせる・揃える・白飛びを抑えるときは solve_exposure に目標を渡す(値を試し続けない)
         - それ以外は adjust で変える。写真ごとに違う変更も 1 回の呼び出しにまとめられる。結果に変更後の主な統計が付く
+        - 切り抜き・傾き補正は set_crop。枠を決めるときは get_preview に ignore_crop を付けて、切り抜く前の全体を見る
         - 値の範囲・効く条件は adjust の各項目の説明にある。例えばシャープネスは等倍で描くときだけ効き、
           縮小したプレビューや統計には表れない
         統計の値はすべて出力の sRGB(見た目に近い値)で 0〜1。
@@ -33,7 +35,8 @@ public enum RawgenzoTools {
 
     // MARK: - 入力の形
 
-    static let photoID = JSONSchema.string("写真の ID(list_photos が返す photo。フォルダ内のファイル名。例 DSC03561.ARW)")
+    static let photoID = JSONSchema.string("写真の ID(list_photos・get_app_state が返す photo。作業フォルダの中ならファイル名 例 DSC03561.ARW、"
+                                           + "それ以外は RAW ファイルの絶対パス 例 /Users/me/Photos/DSC03561.ARW)")
 
     /// adjust の changes。ParameterCatalog の全項目。null で基準値(撮影時の値・デコーダの既定値など)に戻す
     public static var changesSchema: JSONSchema { changesSchema(detailed: true) }
@@ -66,7 +69,7 @@ public enum RawgenzoTools {
         surface.register(ToolDescriptor(
             name: "get_app_state", title: "アプリの表示",
             description: "ユーザが Rawgenzo アプリで今見ているもの(開いている写真・表示倍率・クロップ中か)を返す。"
-                + "「この写真」「今開いている写真」と言われたらまず使う。open_photo が写真の ID。"
+                + "「この写真」「今開いている写真」と言われたらまず使う。open_photo が写真の ID(作業フォルダの外なら絶対パス)。"
                 + "app_connected が false なら、アプリが起動していないか、AI からの操作の受け付けがオフで、アプリの状態は分からない",
             effect: .read)) { _, _ in
             guard let live = ws.live else {
@@ -77,26 +80,18 @@ public enum RawgenzoTools {
             var o: [String: JSONValue] = ["app_connected": true, "cropping": .bool(v.isCropping)]
             let inWorkspace = v.folder.map { $0.standardizedFileURL.path == ws.folder.path } ?? false
             o["folder_is_workspace"] = .bool(inWorkspace)
-            if let f = v.folder, !inWorkspace { o["app_folder"] = .string(f.lastPathComponent) }
-            if let p = v.openPhoto {
-                if inWorkspace, let id = try? ws.url(for: p.lastPathComponent).lastPathComponent {
-                    o["open_photo"] = .string(id)
-                } else {
-                    o["open_photo"] = .null
-                    o["open_photo_outside_workspace"] = .string(p.lastPathComponent)
-                    o["note"] = "アプリで開いている写真は、この作業フォルダの外にあるので操作できない"
-                }
-            } else {
-                o["open_photo"] = .null
-            }
+            // 作業フォルダの外のフォルダも、list_photos の folder にそのまま渡せる形で返す
+            if let f = v.folder, !inWorkspace { o["app_folder"] = .string(f.standardizedFileURL.path) }
+            o["open_photo"] = v.openPhoto.flatMap { try? ws.canonicalID(ws.id(for: $0)) }.map { .string($0) } ?? .null
             o["zoom"] = v.fitsWindow ? "ウインドウに合わせる" : v.zoom.map { .string("\(Int(($0 * 100).rounded()))%") } ?? .null
             return .json(.object(o))
         }
         surface.register(ToolDescriptor(
             name: "list_photos", title: "写真の一覧",
-            description: "作業フォルダの写真と撮影情報を名前順に返す。条件で絞り込める。"
+            description: "作業フォルダ(folder を渡すとそのフォルダ)の写真と撮影情報を名前順に返す。条件で絞り込める。"
                 + "edited は Rawgenzo の設定(サイドカー)があるか",
             input: .object([
+                .init("folder", .string("見るフォルダの絶対パス(省くと作業フォルダ。サブフォルダは含まない)")),
                 .init("iso_min", .integer("ISO がこの値以上")),
                 .init("iso_max", .integer("ISO がこの値以下")),
                 .init("lens_contains", .string("レンズ名にこの文字列を含む(大文字小文字を区別しない)")),
@@ -106,7 +101,7 @@ public enum RawgenzoTools {
             ]),
             effect: .read)) { args, _ in
             var rows: [JSONValue] = []
-            for id in try ws.photoIDs() {
+            for id in try ws.photoIDs(in: args["folder"]?.stringValue.map { try ws.resolveFolder(path: $0) }) {
                 guard let m = try? ws.metadata(id) else { continue }
                 if let v = args["iso_min"]?.intValue, (m.iso ?? 0) < v { continue }
                 if let v = args["iso_max"]?.intValue, (m.iso ?? Int.max) > v { continue }
@@ -122,8 +117,10 @@ public enum RawgenzoTools {
             let offset = args["offset"]?.intValue ?? 0
             let limit = args["limit"]?.intValue ?? 100
             let page = Array(rows.dropFirst(offset).prefix(limit))
-            return .json(["total": .number(Double(rows.count)), "offset": .number(Double(offset)),
-                          "photos": .array(page)])
+            var out: [String: JSONValue] = ["total": .number(Double(rows.count)), "offset": .number(Double(offset)),
+                                            "photos": .array(page)]
+            if let f = args["folder"]?.stringValue { out["folder"] = .string(try ws.resolveFolder(path: f).path) }
+            return .json(.object(out))
         }
 
         surface.register(ToolDescriptor(
@@ -133,7 +130,7 @@ public enum RawgenzoTools {
             input: .object([.init("photo", photoID)], required: ["photo"]),
             effect: .read)) { args, _ in
             let photo = try ws.photo(args["photo"]!.stringValue!)
-            return .json(.object(photoState(photo)))
+            return .json(.object(photoState(photo, id: ws.id(for: photo.url))))
         }
 
         surface.register(ToolDescriptor(
@@ -159,16 +156,23 @@ public enum RawgenzoTools {
             name: "get_preview", title: "縮小画像",
             description: "現像結果の縮小画像(JPEG)を返す。changes を渡すと仮に当てた結果(保存はしない)。"
                 + "画像はトークンを多く使うので、数値(get_stats)で判断できないときだけ使う。"
-                + "縮小して描くのでシャープネスの効果は見えない",
+                + "縮小して描くのでシャープネスの効果は見えない。"
+                + "ignore_crop を true にすると切り抜く前の全体を返す(傾き補正は当てたまま)。"
+                + "その画像のピクセル座標を幅・高さで割った値が、set_crop の座標になる",
             input: .object([
                 .init("photo", photoID),
                 .init("long_edge", .integer("長辺のピクセル数(既定 768)", minimum: 128, maximum: 1600)),
                 .init("changes", changesSchema(detailed: false)),
+                .init("ignore_crop", .boolean("切り抜く前の全体を返すか(既定 false)")),
             ], required: ["photo"]),
             effect: .read)) { args, _ in
             let photo = try ws.photo(args["photo"]!.stringValue!)
             var settings = photo.settings
             if let changes = args["changes"] { _ = apply(changes, to: &settings, photo: photo) }
+            if args["ignore_crop"]?.boolValue == true {
+                // 枠の座標は傾けた後の画像に対するものなので、傾きは残して枠だけ全体にする
+                settings.crop = settings.crop.flatMap { $0.angle == 0 ? nil : CropSettings(angle: $0.angle) }
+            }
             let image = try ws.engine.pipeline.processFitting(photo, settings: settings,
                                                               longEdge: args["long_edge"]?.intValue ?? 768)
             let jpeg = try PreviewEncoder.jpeg(image, quality: 0.75)
@@ -205,13 +209,16 @@ public enum RawgenzoTools {
                 guard !(changes.objectValue ?? [:]).isEmpty || !(deltas.objectValue ?? [:]).isEmpty else {
                     return .error("changes か deltas に変える項目を書いてください")
                 }
-                for id in edit["photos"]!.arrayValue!.compactMap(\.stringValue) {
+                // 先に全部の ID を確かめる(途中で見つからない写真があって半分だけ変わる、を避ける)。
+                // 同じ写真をファイル名と絶対パスの両方で指していても 1 枚として扱う
+                var inThisEdit: Set<String> = []
+                for raw in edit["photos"]!.arrayValue!.compactMap(\.stringValue) {
+                    let id = try ws.canonicalID(raw)
+                    guard inThisEdit.insert(id).inserted else { continue }   // 1 つの要素の中の重複は 1 回だけ当てる
                     if perPhoto[id] == nil { order.append(id) }
                     perPhoto[id, default: []].append(edit)
                 }
             }
-            // 先に全部の ID を確かめる(途中で見つからない写真があって半分だけ変わる、を避ける)
-            for id in order { _ = try ws.url(for: id) }
 
             let observe = (args["observe"]?.boolValue ?? true) && order.count <= observeLimit
             var results: [JSONValue] = []
@@ -232,6 +239,118 @@ public enum RawgenzoTools {
             if !observed.isEmpty { out["stats"] = .object(observed) }
             return .json(.object(out))
         }
+
+        registerCrop(on: surface, workspace: ws)
+    }
+
+    // MARK: 切り抜き
+
+    static let aspectNames = AspectRatio.allCases.map(\.rawValue)
+
+    static func registerCrop(on surface: Surface, workspace ws: RawgenzoWorkspace) {
+        let unit = JSONSchema.number(minimum: 0, maximum: 1)
+        surface.register(ToolDescriptor(
+            name: "set_crop", title: "切り抜き・傾き補正",
+            description: "写真の切り抜き枠と傾き補正を設定してサイドカーに保存する(undo で取り消せる)。"
+                + "枠の x・y・width・height は、傾き補正の後・切り抜く前の画像全体に対する比率(0〜1、左上が原点)で、4 つそろえて渡す。"
+                + "get_preview に ignore_crop: true を付けた画像のピクセル座標を、その幅・高さで割った値になる。"
+                + "aspect だけを渡すとその比率で中央に最大の枠、枠と aspect の両方なら枠の中心を保って比率に合わせて縮める。"
+                + "angle だけを渡すと今の枠のまま傾ける。枠が傾けた画像からはみ出すときは、はみ出さない大きさに縮める(結果の notes)。"
+                + "reset: true で切り抜きも傾きも無しに戻す。複数の写真に同じ指定を当てられる",
+            input: .object([
+                .init("photos", .array(of: photoID, description: "切り抜く写真の ID", minItems: 1, maxItems: 1000)),
+                .init("x", unit), .init("y", unit),
+                .init("width", .number(minimum: 0.05, maximum: 1)), .init("height", .number(minimum: 0.05, maximum: 1)),
+                .init("angle", .number("傾き補正(度)。正 = 時計回り",
+                                       minimum: CropSettings.angleRange.lowerBound, maximum: CropSettings.angleRange.upperBound)),
+                .init("aspect", .string("縦横比。free(自由)・original(元の比率)・square(1:1)・r3x2・r4x3・r16x9・r2x3(縦)・r4x5(縦)",
+                                        oneOf: aspectNames)),
+                .init("reset", .boolean("true で切り抜きと傾き補正を無くす(ほかの項目と一緒には使えない)")),
+            ], required: ["photos"]),
+            effect: .modify)) { args, ctx in
+            let rectKeys = ["x", "y", "width", "height"]
+            let given = rectKeys.filter { args[$0] != nil }
+            let reset = args["reset"]?.boolValue == true
+            let angle = args["angle"]?.doubleValue
+            let aspect = args["aspect"]?.stringValue.flatMap(AspectRatio.init(rawValue:))
+            if reset, !given.isEmpty || angle != nil || aspect != nil {
+                return .error("reset はほかの項目と一緒には使えません")
+            }
+            if !given.isEmpty, given.count < 4 { return .error("x・y・width・height は 4 つそろえて渡してください") }
+            if !reset, given.isEmpty, angle == nil, aspect == nil {
+                return .error("枠(x・y・width・height)・aspect・angle・reset のどれかを指定してください")
+            }
+            if given.count == 4, args["x"]!.doubleValue! + args["width"]!.doubleValue! > 1 + 1e-9
+                || args["y"]!.doubleValue! + args["height"]!.doubleValue! > 1 + 1e-9 {
+                return .error("枠が画像の外に出ています(x + width と y + height は 1 以下)")
+            }
+            var ids: [String] = []
+            for raw in args["photos"]!.arrayValue!.compactMap(\.stringValue) {
+                let id = try ws.canonicalID(raw)
+                if !ids.contains(id) { ids.append(id) }
+            }
+
+            var results: [JSONValue] = []
+            for id in ids {
+                let photo = try ws.photo(id)
+                let before = photo.settings
+                var after = before
+                var notes: [String] = []
+                if reset {
+                    after.crop = nil
+                } else {
+                    let imageAspect = photo.imageAspect
+                    let tilt = angle ?? before.crop?.angle ?? 0
+                    var c: CropSettings
+                    if given.count == 4 {
+                        c = CropSettings(x: args["x"]!.doubleValue!, y: args["y"]!.doubleValue!,
+                                         width: args["width"]!.doubleValue!, height: args["height"]!.doubleValue!,
+                                         angle: tilt, aspect: aspect ?? .free)
+                        if let a = aspect, let ratio = a.value(imageAspect: imageAspect) {
+                            let shrunk = c.shrunk(toAspect: ratio, imageAspect: imageAspect)
+                            if differs(shrunk, c) { notes.append("枠の中心を保って \(a.label) に合わせて縮めた") }
+                            c = shrunk
+                        }
+                    } else if let a = aspect {
+                        c = .centered(aspect: a, imageAspect: imageAspect, angle: tilt)
+                    } else {
+                        c = before.crop ?? .full
+                        c.angle = tilt
+                    }
+                    let requested = c
+                    c = c.clamped()
+                    if !c.isInsideImage(imageAspect: imageAspect) { c = c.fitted(imageAspect: imageAspect) }
+                    // 等しいかではなく差の大きさで比べる。y 0.19・高さ 0.81 のように下端がちょうど 1 の枠は、
+                    // clamped の 1 - 0.81 = 0.18999999999999995 で値がわずかに変わり、縮めていないのに注記が付いた(試験)
+                    if differs(c, requested) {
+                        notes.append("枠が傾けた画像からはみ出すので、はみ出さない大きさに縮めた")
+                    }
+                    after.crop = c == .full ? nil : c
+                }
+                if after != before { try commit(ws, ctx, photo, from: before, to: after) }
+                var row: [String: JSONValue] = ["photo": .string(id), "crop": ["from": cropJSON(before.crop), "to": cropJSON(after.crop)]]
+                let size = photo.source.nativeSize
+                let c = after.crop ?? .full
+                row["cropped_size"] = [.number((Double(size.width) * c.width).rounded()),
+                                       .number((Double(size.height) * c.height).rounded())]
+                if after == before { notes.append("変更なし") }
+                if !notes.isEmpty { row["notes"] = .array(notes.map { .string($0) }) }
+                results.append(.object(row))
+            }
+            return .json(["results": .array(results)])
+        }
+    }
+
+    /// 枠が目に見えて違うか(小数の誤差は同じとみなす)
+    static func differs(_ a: CropSettings, _ b: CropSettings) -> Bool {
+        [a.x - b.x, a.y - b.y, a.width - b.width, a.height - b.height, a.angle - b.angle].contains { abs($0) > 1e-6 }
+    }
+
+    static func cropJSON(_ crop: CropSettings?) -> JSONValue {
+        guard let c = crop else { return .null }
+        return ["x": .number(round4(c.x)), "y": .number(round4(c.y)),
+                "width": .number(round4(c.width)), "height": .number(round4(c.height)),
+                "angle": .number(round4(c.angle)), "aspect": .string(c.aspect.rawValue)]
     }
 
     // MARK: 目標で指示する
@@ -267,8 +386,10 @@ public enum RawgenzoTools {
             // 試験では AI によって明るさを保つ目標を付けたり付けなかったりしたので、既定で保つ
             let keepBrightness = mean == nil && median == nil && (args["keep_brightness"]?.boolValue ?? true)
             var ids: [String] = []
-            for id in args["photos"]!.arrayValue!.compactMap(\.stringValue) where !ids.contains(id) { ids.append(id) }
-            for id in ids { _ = try ws.url(for: id) }
+            for raw in args["photos"]!.arrayValue!.compactMap(\.stringValue) {
+                let id = try ws.canonicalID(raw)
+                if !ids.contains(id) { ids.append(id) }
+            }
 
             var results: [JSONValue] = []
             for id in ids {
@@ -310,7 +431,7 @@ public enum RawgenzoTools {
     /// 最初の版は変更前の設定を丸ごと書き戻していて、切り替えの後にアプリで行った変更を黙って消した(2026-10-16 の試験)
     static func commit(_ ws: RawgenzoWorkspace, _ ctx: ToolContext, _ photo: Photo,
                        from before: DevelopSettings, to after: DevelopSettings) throws {
-        let id = photo.url.lastPathComponent
+        let id = ws.id(for: photo.url)
         let hadSidecar = ws.hasSidecar(id)
         try ws.save(photo, settings: after, origin: ChangeOrigin(caller: ctx.caller, task: ctx.task))
         let fields = SettingsFields.changed(before, after)
@@ -422,11 +543,11 @@ public enum RawgenzoTools {
         return o
     }
 
-    static func photoState(_ photo: Photo) -> [String: JSONValue] {
+    static func photoState(_ photo: Photo, id: String) -> [String: JSONValue] {
         let s = photo.settings
         let context = photo.parameterContext
         var o = shootingInfo(photo.metadata)
-        o["photo"] = .string(photo.url.lastPathComponent)
+        o["photo"] = .string(id)
         o["camera"] = .string(photo.profile.displayName)
         let size = photo.source.nativeSize
         o["size"] = [.number(Double(Int(size.width))), .number(Double(Int(size.height)))]
@@ -437,13 +558,7 @@ public enum RawgenzoTools {
         }))
         o["follows_baseline"] = .array(ParameterCatalog.all.filter { $0.isOptional && $0.storedValue(s) == nil }
             .map { .string($0.id) })
-        if let c = s.crop {
-            o["crop"] = ["x": .number(round4(c.x)), "y": .number(round4(c.y)),
-                         "width": .number(round4(c.width)), "height": .number(round4(c.height)),
-                         "angle": .number(round4(c.angle)), "aspect": .string(c.aspect.rawValue)]
-        } else {
-            o["crop"] = .null
-        }
+        o["crop"] = cropJSON(s.crop)
         o["look"] = s.look.map { ["id": .string($0.id), "strength": .number(round4($0.strength))] } ?? .null
         if photo.lensCorrection == nil {
             o["lens_correction"] = "このレンズには補正情報がない"

@@ -133,6 +133,7 @@ struct InspectorView: View {
         InspectorSection("クロップ", id: .crop) {
             Toggle(model.isCropping ? "枠を調整中" : "枠を調整する", isOn: $model.isCropping)
                 .toggleStyle(.button)
+                .modifier(AgentHighlight(isOn: model.agentHighlights.contains("crop.frame")))
 
             Picker("比率", selection: Binding(
                 get: { model.settings.crop?.aspect ?? .free },
@@ -142,11 +143,13 @@ struct InspectorView: View {
                 })) {
                 ForEach(AspectRatio.allCases, id: \.self) { Text($0.label).tag($0) }
             }
+            .modifier(AgentHighlight(isOn: model.agentHighlights.contains("crop.aspect")))
 
             AdjustSlider("傾き補正", value: Binding(
                 get: { model.settings.crop?.angle ?? 0 },
                 set: { model.setTiltAngle($0) }),
                 range: CropSettings.angleRange, neutral: 0, format: "%+.1f°")
+                .modifier(AgentHighlight(isOn: model.agentHighlights.contains("crop.angle")))
 
             Button("収まる最大まで広げる") {
                 model.maximizeCrop()

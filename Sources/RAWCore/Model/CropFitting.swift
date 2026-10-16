@@ -40,6 +40,22 @@ extension CropSettings {
         return g.settings(center: center, half: g.half * s, from: self)
     }
 
+    /// 枠の中心を保ったまま、指定の縦横比(画面上の 幅/高さ)になるまで長すぎる辺を縮める(広げない)。
+    /// AI が枠と比率を両方指定したときに使う(枠は「この範囲の中で」という指定として扱う)
+    public func shrunk(toAspect ratio: Double, imageAspect: Double) -> CropSettings {
+        guard ratio > 0, imageAspect > 0, height > 0 else { return self }
+        var c = self
+        let current = width * imageAspect / height
+        if current > ratio {
+            c.width = ratio * height / imageAspect
+        } else {
+            c.height = width * imageAspect / ratio
+        }
+        c.x = x + (width - c.width) / 2
+        c.y = y + (height - c.height) / 2
+        return c
+    }
+
     /// 縦横比を保ったまま、内側に収まる最大の大きさにする(広げることも縮めることもある)。
     /// 位置は、その大きさで収まる位置のうち今の位置に一番近いところ(構図をなるべく崩さない)。
     ///

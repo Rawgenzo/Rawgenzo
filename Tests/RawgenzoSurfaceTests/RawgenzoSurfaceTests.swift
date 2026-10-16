@@ -21,14 +21,14 @@ final class RawgenzoToolsSchemaTests: XCTestCase {
         let ws = RawgenzoWorkspace(folder: FileManager.default.temporaryDirectory)
         let surface = RawgenzoTools.makeSurface(workspace: ws)
         XCTAssertEqual(surface.descriptors.map(\.name),
-                       ["get_app_state", "list_photos", "get_photo", "get_stats", "get_preview", "adjust", "solve_exposure", "undo", "recent_operations"])
+                       ["get_app_state", "list_photos", "get_photo", "get_stats", "get_preview", "adjust", "set_crop", "solve_exposure", "undo", "recent_operations"])
         XCTAssertEqual(surface.descriptors.first { $0.name == "adjust" }?.effect, .modify)
     }
 
-    /// フォルダの外を指す ID は受け付けない
+    /// 相対パス・隠しファイル・RAW でないファイルは受け付けない(作業フォルダの外は絶対パスでだけ指せる)
     func testIDsOutsideFolderAreRejected() {
         let ws = RawgenzoWorkspace(folder: FileManager.default.temporaryDirectory)
-        for bad in ["../x.ARW", "a/b.ARW", "/etc/passwd", ".hidden.ARW", "..", "x.txt", ""] {
+        for bad in ["../x.ARW", "a/b.ARW", "/etc/passwd", "/tmp/.hidden.ARW", ".hidden.ARW", "..", "x.txt", "", "/no/such/x.ARW"] {
             XCTAssertThrowsError(try ws.url(for: bad), bad)
         }
         let surface = RawgenzoTools.makeSurface(workspace: ws)
@@ -43,6 +43,7 @@ final class RawgenzoToolsSchemaTests: XCTestCase {
 final class RawgenzoToolsSampleTests: XCTestCase {
     private var folder: URL!
     private var surface: Surface!
+    private var workspace: RawgenzoWorkspace!
     private var id = ""
     private var id2 = ""
     private let ai = Caller.agent("test")
@@ -60,7 +61,8 @@ final class RawgenzoToolsSampleTests: XCTestCase {
         }
         id = samples[0].lastPathComponent
         id2 = samples[1].lastPathComponent
-        surface = RawgenzoTools.makeSurface(workspace: RawgenzoWorkspace(folder: folder))
+        workspace = RawgenzoWorkspace(folder: folder)
+        surface = RawgenzoTools.makeSurface(workspace: workspace)
     }
 
     override func tearDownWithError() throws {
@@ -232,6 +234,116 @@ final class RawgenzoToolsSampleTests: XCTestCase {
         XCTAssertTrue(surface.call("adjust", arguments: ["edits": [["photos": [.string(id)]]]], as: ai).isError,
                       "changes も deltas も無い")
     }
+
+    /// 作業フォルダの外の写真は絶対パスで指せる。サイドカーはその写真の隣に書き、undo で戻る
+    func testPhotoInAnotherFolderByAbsolutePath() throws {
+        let other = FileManager.default.temporaryDirectory.appendingPathComponent("rawgenzo-other-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: other, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: other) }
+        let source = try FileManager.default.destinationOfSymbolicLink(atPath: folder.appendingPathComponent(id).path)
+        try FileManager.default.createSymbolicLink(at: other.appendingPathComponent(id), withDestinationURL: URL(fileURLWithPath: source))
+        let path = other.appendingPathComponent(id).standardizedFileURL.path
+
+        let list = try json(surface.call("list_photos", arguments: ["folder": .string(other.path)], as: ai))
+        XCTAssertEqual(list["total"], 1)
+        XCTAssertEqual(list["photos"]?.arrayValue?.first?["photo"], .string(path), "作業フォルダの外は絶対パスの ID")
+        XCTAssertTrue(surface.call("list_photos", arguments: ["folder": "/no/such/folder"], as: ai).isError)
+
+        let r = try json(surface.call("adjust", arguments: ["edits": [["photos": [.string(path)], "changes": ["exposure": 0.5]]],
+                                                            "observe": false], as: ai))
+        XCTAssertEqual(r["results"]?.arrayValue?.first?["photo"], .string(path))
+        XCTAssertEqual(SidecarStore().load(for: other.appendingPathComponent(id))?.settings.exposure, 0.5)
+        XCTAssertNil(SidecarStore().load(for: folder.appendingPathComponent(id)), "作業フォルダの同名の写真には書かない")
+        XCTAssertEqual(try json(surface.call("get_photo", arguments: ["photo": .string(path)], as: ai))["photo"], .string(path))
+
+        XCTAssertFalse(surface.call("undo", as: ai).isError)
+        XCTAssertNil(SidecarStore().load(for: other.appendingPathComponent(id)))
+    }
+
+    /// 作業フォルダの写真は、絶対パスで指してもファイル名の ID にそろえる(同じ写真を 2 枚と数えない)
+    func testAbsolutePathInsideWorkspaceIsCanonicalized() throws {
+        let path = folder.appendingPathComponent(id).path
+        let r = try json(surface.call("adjust", arguments: ["edits": [
+            ["photos": [.string(id), .string(path)], "deltas": ["exposure": 0.25]],
+        ], "observe": false], as: ai))
+        XCTAssertEqual(r["results"]?.arrayValue?.count, 1)
+        XCTAssertEqual(r["results"]?.arrayValue?.first?["photo"], .string(id))
+        XCTAssertEqual(r["results"]?.arrayValue?.first?["changed"]?["exposure"]?["to"], 0.25, "1 回だけ足す")
+    }
+
+    /// set_crop: 枠を保存し、切り抜く前の全体を get_preview で見られ、undo で無しに戻る
+    func testSetCrop() throws {
+        let r = try json(surface.call("set_crop", arguments: [
+            "photos": [.string(id)], "x": 0.1, "y": 0.2, "width": 0.6, "height": 0.7,
+        ], as: ai))
+        let row = try XCTUnwrap(r["results"]?.arrayValue?.first)
+        XCTAssertEqual(row["crop"]?["from"], .null)
+        XCTAssertEqual(row["crop"]?["to"]?["width"], 0.6)
+        let saved = try XCTUnwrap(SidecarStore().load(for: folder.appendingPathComponent(id))?.settings.crop)
+        XCTAssertEqual(saved.x, 0.1); XCTAssertEqual(saved.height, 0.7)
+
+        func previewSize(_ args: JSONValue) throws -> (Double, Double) {
+            let p = surface.call("get_preview", arguments: args, as: ai)
+            XCTAssertFalse(p.isError, p.summary)
+            for c in p.content {
+                if case .text(let t) = c {
+                    let n = t.split(separator: "×").compactMap { Double($0) }
+                    if n.count == 2 { return (n[0], n[1]) }
+                }
+            }
+            throw XCTSkip("大きさが返らない")
+        }
+        let photoState = try json(surface.call("get_photo", arguments: ["photo": .string(id)], as: ai))
+        let size = try XCTUnwrap(photoState["size"]?.arrayValue?.compactMap(\.doubleValue))
+        let cropped = try previewSize(["photo": .string(id), "long_edge": 600])
+        XCTAssertEqual(cropped.0 / cropped.1, size[0] * 0.6 / (size[1] * 0.7), accuracy: 0.02)
+        let whole = try previewSize(["photo": .string(id), "long_edge": 600, "ignore_crop": true])
+        XCTAssertEqual(whole.0 / whole.1, size[0] / size[1], accuracy: 0.02, "切り抜く前の全体")
+
+        XCTAssertFalse(surface.call("undo", as: ai).isError)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: sidecar.path))
+
+        // 下端がちょうど 1 の枠: 小数の誤差で「縮めた」と注記しない(試験で付いた)
+        let edge = try json(surface.call("set_crop", arguments: [
+            "photos": [.string(id)], "x": 0.054, "y": 0.19, "width": 0.728, "height": 0.81,
+        ], as: ai))
+        XCTAssertNil(edge["results"]?.arrayValue?.first?["notes"], "\(edge)")
+    }
+
+    /// set_crop の比率・傾き・解除と、入力の誤り
+    func testSetCropAspectAngleAndReset() throws {
+        // 枠と比率: 中心を保って縮める
+        var r = try json(surface.call("set_crop", arguments: [
+            "photos": [.string(id)], "x": 0, "y": 0, "width": 1, "height": 1, "aspect": "square",
+        ], as: ai))
+        var c = try XCTUnwrap(SidecarStore().load(for: folder.appendingPathComponent(id))?.settings.crop)
+        let aspect = try workspace.photo(id).imageAspect
+        XCTAssertEqual(c.width * aspect / c.height, 1, accuracy: 1e-6)
+        XCTAssertEqual(c.x + c.width / 2, 0.5, accuracy: 1e-9)
+        XCTAssertEqual(c.aspect, .square)
+        XCTAssertNotNil(r["results"]?.arrayValue?.first?["notes"])
+
+        // 傾きだけ: 今の枠のまま傾け、はみ出すなら縮める
+        r = try json(surface.call("set_crop", arguments: ["photos": [.string(id)], "angle": 10], as: ai))
+        c = try XCTUnwrap(SidecarStore().load(for: folder.appendingPathComponent(id))?.settings.crop)
+        XCTAssertEqual(c.angle, 10)
+        XCTAssertTrue(c.isInsideImage(imageAspect: aspect))
+
+        // 解除
+        r = try json(surface.call("set_crop", arguments: ["photos": [.string(id)], "reset": true], as: ai))
+        XCTAssertEqual(r["results"]?.arrayValue?.first?["crop"]?["to"], .null)
+        XCTAssertNil(SidecarStore().load(for: folder.appendingPathComponent(id))?.settings.crop)
+
+        for bad: JSONValue in [
+            ["photos": [.string(id)]],
+            ["photos": [.string(id)], "x": 0.1, "y": 0.1],
+            ["photos": [.string(id)], "x": 0.5, "y": 0, "width": 0.6, "height": 0.5],
+            ["photos": [.string(id)], "reset": true, "angle": 1],
+            ["photos": [.string(id)], "aspect": "5:4"],
+        ] {
+            XCTAssertTrue(surface.call("set_crop", arguments: bad, as: ai).isError, "\(bad)")
+        }
+    }
 }
 
 final class RawgenzoToolsSizeTests: XCTestCase {
@@ -356,12 +468,27 @@ final class RawgenzoAgentHostTests: XCTestCase {
         XCTAssertEqual(s["folder_is_workspace"], true)
         XCTAssertEqual(s["zoom"], "100%")
 
-        editor.folderShown = URL(fileURLWithPath: "/somewhere/else", isDirectory: true)
-        editor.openURL = URL(fileURLWithPath: "/somewhere/else/DSC00001.ARW")
+        // 作業フォルダの外: 絶対パスの ID で返し、そのまま道具に渡せる
+        let other = FileManager.default.temporaryDirectory.appendingPathComponent("rg-other-\(UUID().uuidString.prefix(8))")
+        try FileManager.default.createDirectory(at: other, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: other) }
+        let source = try FileManager.default.destinationOfSymbolicLink(atPath: folder.appendingPathComponent(ids[1]).path)
+        let outside = other.appendingPathComponent(ids[1]).standardizedFileURL
+        try FileManager.default.createSymbolicLink(at: outside, withDestinationURL: URL(fileURLWithPath: source))
+        editor.folderShown = other
+        editor.openURL = outside
         s = try state()
-        XCTAssertEqual(s["open_photo"], .null)
-        XCTAssertEqual(s["open_photo_outside_workspace"], "DSC00001.ARW")
-        XCTAssertEqual(s["app_folder"], "else")
+        XCTAssertEqual(s["open_photo"], .string(outside.path))
+        XCTAssertEqual(s["folder_is_workspace"], false)
+        XCTAssertEqual(s["app_folder"], .string(other.standardizedFileURL.path))
+
+        let r = try exchange([RawgenzoBridge.handshake(folder: folder),
+                              #"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"clientInfo":{"name":"t"}}}"#,
+                              call(2, "set_crop", ["photos": [.string(outside.path)], "x": 0.1, "y": 0.1, "width": 0.5, "height": 0.5])],
+                             replies: 2)
+        XCTAssertEqual(r[1]["result"]?["isError"], false, "\(r)")
+        XCTAssertEqual(editor.settings.crop?.width, 0.5, "アプリで開いている作業フォルダ外の写真に、その場で届く")
+        XCTAssertEqual(SidecarStore().load(for: outside)?.settings.crop?.x, 0.1)
     }
 
     func testRequiresHandshake() throws {

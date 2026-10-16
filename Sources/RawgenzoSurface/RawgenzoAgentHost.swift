@@ -63,8 +63,10 @@ public final class RawgenzoAgentHost {
     public func noteHumanChange(_ url: URL) {
         queue.async { [weak self] in
             guard let self else { return }
-            let folder = url.deletingLastPathComponent().standardizedFileURL
-            self.surfaces[folder]?.noteChange(by: Self.human, resource: url.path, description: "アプリでの変更")
+            // 写真は作業フォルダの外からも(絶対パスで)指せるので、写真のフォルダに限らず全部の操作面に知らせる
+            for s in self.surfaces.values {
+                s.noteChange(by: Self.human, resource: url.standardizedFileURL.path, description: "アプリでの変更")
+            }
         }
     }
 
