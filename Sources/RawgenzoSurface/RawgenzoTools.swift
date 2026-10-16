@@ -271,16 +271,38 @@ public enum RawgenzoTools {
     /// adjust の結果に統計を付ける写真の数の上限(1 枚 0.2 秒ほどかかり、約 180 バイト増える)
     static let observeLimit = 10
 
-    /// 設定を保存し、取り消しの手順を登録する。サイドカーが無かった写真の取り消しはサイドカーを消して「未編集」に戻す
+    /// 設定を保存し、取り消しの手順を登録する。
+    ///
+    /// 取り消しは「この取引が変えた項目だけを、変更前の値に戻す」。ほかの項目は取り消すときの値を残す。
+    /// 取り消す前に、変えた項目が今もこの取引の直後の値のままかを確かめ、違えば断る(後から別の操作で変えられている)。
+    /// 操作面の履歴ではなく今の状態(アプリで開いていれば編集中の値、そうでなければサイドカー)で確かめるので、
+    /// アプリと rawdev の切り替えをまたいだ変更や、CLI・手作業の変更も見つけられる。
+    /// 最初の版は変更前の設定を丸ごと書き戻していて、切り替えの後にアプリで行った変更を黙って消した(2026-10-16 の試験)
     static func commit(_ ws: RawgenzoWorkspace, _ ctx: ToolContext, _ photo: Photo,
                        from before: DevelopSettings, to after: DevelopSettings) throws {
         let id = photo.url.lastPathComponent
         let hadSidecar = ws.hasSidecar(id)
         try ws.save(photo, settings: after, origin: ChangeOrigin(caller: ctx.caller, task: ctx.task))
+        let fields = SettingsFields.changed(before, after)
         let undoOrigin = ChangeOrigin(caller: ctx.caller, task: ctx.task, isUndo: true)
-        ctx.registerUndo("\(id) の設定", resource: photo.url.path) {
+        ctx.registerUndo("\(id) の設定", resource: photo.url.path, check: {
+            let now = try ws.photo(id).settings
+            let altered = fields.filter { !SettingsFields.same($0, now, after) }
+            if !altered.isEmpty {
+                throw UndoWouldDiscardChanges(photo: id, fields: altered.map {
+                    ($0, SettingsFields.describe($0, now), SettingsFields.describe($0, after))
+                })
+            }
+        }) {
             let p = try ws.photo(id)
-            if hadSidecar { try ws.save(p, settings: before, origin: undoOrigin) } else { try ws.removeSidecar(p, origin: undoOrigin) }
+            var restored = p.settings
+            for f in fields { SettingsFields.copy(f, from: before, to: &restored) }
+            // サイドカーが無かった写真は、戻した結果が初期値と同じときだけ消す(後から他の項目が書かれていれば残す)
+            if !hadSidecar, restored == p.profile.initialSettings(for: p.metadata) {
+                try ws.removeSidecar(p, origin: undoOrigin)
+            } else {
+                try ws.save(p, settings: restored, origin: undoOrigin)
+            }
         }
     }
 

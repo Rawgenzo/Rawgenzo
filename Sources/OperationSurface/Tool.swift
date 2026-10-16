@@ -129,14 +129,19 @@ public final class ToolContext {
     /// (登録の逆順に実行する)。処理の途中で失敗したときは、それまでに登録した手順でその場で元に戻す。
     /// - resource: 変えたものの識別子(写真のパスなど)。後から別の主体が同じものを変えていたら取り消しを断る。
     ///   取り消しは「変える前の値に戻す」なので、断らないと後から入った人の変更まで消してしまうため
-    public func registerUndo(_ label: String, resource: String, _ action: @escaping () throws -> Void) {
-        undoActions.append(UndoStep(label: label, resource: resource, action: action))
+    /// - check: 取り消す前の確認(任意)。今の状態を見て、取り消すと他の変更を消してしまうなら例外を投げる(その説明が AI に渡る)。
+    ///   操作面の履歴に載らない変更(別のプロセス、手作業など)は履歴では見つけられないので、状態で確かめる。
+    ///   取引のすべての確認が通ってから、手順を 1 つも実行していない状態で取り消しを始める
+    public func registerUndo(_ label: String, resource: String, check: (() throws -> Void)? = nil,
+                             _ action: @escaping () throws -> Void) {
+        undoActions.append(UndoStep(label: label, resource: resource, check: check, action: action))
     }
 }
 
 struct UndoStep {
     var label: String
     var resource: String
+    var check: (() throws -> Void)?
     var action: () throws -> Void
 }
 

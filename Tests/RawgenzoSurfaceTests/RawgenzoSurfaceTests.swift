@@ -384,3 +384,101 @@ final class RawgenzoAgentHostTests: XCTestCase {
         XCTAssertEqual(state["adjustments"]?["saturation"], 1.7)
     }
 }
+
+/// 取り消しが、操作面の履歴に載らない変更(別のプロセスの操作面、CLI、手作業)を消さないこと。
+/// 同じフォルダに 2 つの作業場所・操作面を作り、アプリと rawdev の切り替えをまたいだ状況を再現する(RAW_SAMPLE_DIR のときだけ)
+final class CrossProcessUndoTests: XCTestCase {
+    private var folder: URL!
+    private var rawdev: Surface!   // rawdev mcp が自分で処理するときの操作面
+    private var app: Surface!      // アプリの中の操作面
+    private var ids: [String] = []
+    private let ai = Caller.agent("mcp:claude-code")
+
+    override func setUpWithError() throws {
+        guard let dir = ProcessInfo.processInfo.environment["RAW_SAMPLE_DIR"] else { throw XCTSkip("RAW_SAMPLE_DIR が未設定") }
+        let samples = try RAWEngine().listCandidates(in: URL(fileURLWithPath: (dir as NSString).expandingTildeInPath))
+        guard samples.count >= 2 else { throw XCTSkip("サンプルが 2 枚以上必要") }
+        folder = FileManager.default.temporaryDirectory.appendingPathComponent("rg-cross-\(UUID().uuidString.prefix(8))")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        for s in samples.prefix(2) {
+            try FileManager.default.createSymbolicLink(at: folder.appendingPathComponent(s.lastPathComponent), withDestinationURL: s)
+        }
+        ids = samples.prefix(2).map(\.lastPathComponent)
+        rawdev = RawgenzoTools.makeSurface(workspace: RawgenzoWorkspace(folder: folder))
+        app = RawgenzoTools.makeSurface(workspace: RawgenzoWorkspace(folder: folder))
+    }
+
+    override func tearDownWithError() throws {
+        if let folder { try? FileManager.default.removeItem(at: folder) }
+    }
+
+    private func adjust(_ s: Surface, _ photos: [String], _ changes: JSONValue, deltas: Bool = false) {
+        let r = s.call("adjust", arguments: ["edits": [["photos": .array(photos.map { .string($0) }),
+                                                        deltas ? "deltas" : "changes": changes]], "observe": false], as: ai)
+        XCTAssertFalse(r.isError, r.summary)
+    }
+
+    private func saved(_ id: String) -> DevelopSettings? {
+        SidecarStore().load(for: folder.appendingPathComponent(id))?.settings
+    }
+
+    /// バグレポートの再現手順: rawdev で露出 → アプリで彩度 → rawdev で undo。露出だけ戻り、彩度は残る
+    func testUndoKeepsOtherProcessChangeToAnotherField() throws {
+        adjust(rawdev, [ids[0]], ["exposure": 0.738])
+        adjust(rawdev, [ids[0]], ["exposure": 0.5], deltas: true)           // 0.738 → 1.238
+        adjust(app, [ids[0]], ["saturation": 0])
+        let r = rawdev.call("undo", as: ai)
+        XCTAssertFalse(r.isError, r.summary)
+        let s = try XCTUnwrap(saved(ids[0]))
+        XCTAssertEqual(s.exposure, 0.738, accuracy: 1e-9, "露出だけ戻る")
+        XCTAssertEqual(s.saturation, 0, "アプリでの彩度の変更は残る")
+    }
+
+    /// 同じ項目を後から別の操作で変えていたら、取り消しを断り、何も変えない
+    func testUndoRefusesWhenTheSameFieldWasChangedElsewhere() throws {
+        adjust(rawdev, [ids[0]], ["exposure": 1])
+        adjust(app, [ids[0]], ["exposure": -1])
+        let r = rawdev.call("undo", as: ai)
+        XCTAssertTrue(r.isError)
+        XCTAssertTrue(r.summary.contains("露出"), r.summary)
+        XCTAssertTrue(r.summary.contains("\(ids[0])"), r.summary)
+        XCTAssertEqual(saved(ids[0])?.exposure, -1, "アプリでの変更が残る")
+        XCTAssertEqual(rawdev.undoCount(for: ai), 1, "取引は残る(状況が変われば取り消せる)")
+    }
+
+    /// 手作業でサイドカーを書き換えた場合も同じ(操作面をまったく通らない変更)
+    func testUndoRefusesAfterManualSidecarEdit() throws {
+        adjust(rawdev, [ids[0]], ["contrast": 0.5])
+        let raw = folder.appendingPathComponent(ids[0])
+        var record = try XCTUnwrap(SidecarStore().load(for: raw))
+        record.settings.contrast = 0.2
+        try SidecarStore().save(record, for: raw)
+        XCTAssertTrue(rawdev.call("undo", as: ai).isError)
+        XCTAssertEqual(saved(ids[0])?.contrast, 0.2)
+    }
+
+    /// サイドカーが無かった写真: 後から別の項目が書かれていれば、サイドカーは消さずに変えた項目だけ戻す
+    func testUndoOfNewSidecarKeepsFileWhenOthersWrote() throws {
+        let sidecar = folder.appendingPathComponent(ids[0]).appendingPathExtension("rawgenzo.json")
+        adjust(rawdev, [ids[0]], ["exposure": 1])
+        adjust(app, [ids[0]], ["vibrance": 0.4])
+        XCTAssertFalse(rawdev.call("undo", as: ai).isError)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: sidecar.path), "アプリの変更が入ったサイドカーは消さない")
+        XCTAssertEqual(saved(ids[0])?.exposure, 0)
+        XCTAssertEqual(saved(ids[0])?.vibrance, 0.4)
+
+        // 誰も他に書いていなければ、これまでどおりサイドカーを消して未編集に戻す
+        adjust(rawdev, [ids[1]], ["exposure": 1])
+        XCTAssertFalse(rawdev.call("undo", as: ai).isError)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: folder.appendingPathComponent(ids[1]).appendingPathExtension("rawgenzo.json").path))
+    }
+
+    /// 複数の写真をまとめて取り消すとき、1 枚でも断られたら 1 枚も変えない
+    func testMultiPhotoUndoIsAllOrNothing() throws {
+        adjust(rawdev, ids, ["exposure": 1])
+        adjust(app, [ids[1]], ["exposure": 2])
+        XCTAssertTrue(rawdev.call("undo", as: ai).isError)
+        XCTAssertEqual(saved(ids[0])?.exposure, 1, "断られなかった方の写真も変えない")
+        XCTAssertEqual(saved(ids[1])?.exposure, 2)
+    }
+}

@@ -276,6 +276,31 @@ final class SurfaceTests: XCTestCase {
         XCTAssertFalse(s.call("undo", as: ai).isError, "別の写真なら取り消せる")
     }
 
+    /// 取り消す前の確認が 1 つでも通らなければ、どの手順も実行しない(複数の対象をまとめて取り消すときに半端にしない)
+    func testUndoCheckFailurePreventsAllActions() throws {
+        let s = Surface(name: "x", version: "1")
+        var a = 0, b = 0
+        var allowB = false
+        struct Changed: Error, CustomStringConvertible { var description: String { "b が後から変えられている" } }
+        s.register(ToolDescriptor(name: "set_both", title: "両方", description: "a と b を 1 にする", effect: .modify)) { _, ctx in
+            a = 1; b = 1
+            ctx.registerUndo("a", resource: "a") { a = 0 }
+            ctx.registerUndo("b", resource: "b", check: { if !allowB { throw Changed() } }) { b = 0 }
+            return .text("ok")
+        }
+        s.registerStandardTools()
+        let ai = Caller.agent("t")
+        _ = s.call("set_both", as: ai)
+        let r = s.call("undo", as: ai)
+        XCTAssertTrue(r.isError)
+        XCTAssertTrue(r.summary.contains("b が後から変えられている"), r.summary)
+        XCTAssertEqual(a, 1, "a も戻さない")
+        XCTAssertEqual(s.undoCount(for: ai), 1, "取引は残る")
+        allowB = true
+        XCTAssertFalse(s.call("undo", as: ai).isError)
+        XCTAssertEqual([a, b], [0, 0])
+    }
+
     func testStandardGuidanceIsAddedToInstructions() {
         let s = Surface(name: "x", version: "1", instructions: "ソフトの説明")
         XCTAssertEqual(s.fullInstructions, "ソフトの説明")

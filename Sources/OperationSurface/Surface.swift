@@ -286,6 +286,10 @@ public final class Surface {
                 }
             }
         }
+        // 状態による確認(履歴に載らない変更を見つける)。全部通ってから取り消し始める
+        for i in targets {
+            for step in undoStack[i].actions { try step.check?() }
+        }
         var tools: [String] = []
         for i in targets.sorted(by: >) {
             for step in undoStack[i].actions.reversed() { try step.action() }
