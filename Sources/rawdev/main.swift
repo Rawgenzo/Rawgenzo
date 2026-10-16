@@ -286,33 +286,19 @@ case "mcp":
         logError("[rawgenzo] \(r.tool) \(r.isError ? "失敗" : "成功") \(r.durationMs)ms 文字 \(r.textBytes)B 画像 \(r.images.count) 枚(\(via))")
     }
 
-    // Rawgenzo アプリが起動していて AI からの操作を受け付けていれば、アプリに中継する
-    // (AI の変更がアプリの画面にその場で出て、アプリの自動保存が上書きしない)。受け付けていなければ自分で処理する
-    if let fd = UnixSocketBridge.connect(path: RawgenzoBridge.socketPath) {
-        logError("[rawgenzo] 起動中の Rawgenzo アプリに中継します: \(folder.path)")
-        var calls: [String: (tool: String, args: JSONValue, start: Date)] = [:]
-        let callsLock = NSLock()
-        UnixSocketBridge.relay(fd: fd, first: [RawgenzoBridge.handshake(folder: folder)]) { line, toServer in
-            guard let m = try? JSONDecoder().decode(JSONValue.self, from: Data(line.utf8)), let id = m["id"] else { return }
-            let key = id.jsonString()
-            callsLock.lock(); defer { callsLock.unlock() }
-            if toServer {
-                if m["method"] == "tools/call", let tool = m["params"]?["name"]?.stringValue {
-                    calls[key] = (tool, m["params"]?["arguments"] ?? .object([:]), Date())
-                }
-            } else if let c = calls.removeValue(forKey: key) {
-                logCall(MCPServer.record(tool: c.tool, arguments: c.args, response: m,
-                                         durationMs: Int(Date().timeIntervalSince(c.start) * 1000)), via: "app")
-            }
-        }
-        exit(0)
-    }
-
+    // 道具を呼ぶたびに、Rawgenzo アプリが AI からの操作を受け付けているかを確かめ、受け付けていればアプリに中継する
+    // (AI の変更がアプリの画面にその場で出て、アプリの自動保存が上書きしない)。受け付けていなければ自分で処理する。
+    // 会話の途中でアプリを起動・終了しても切り替わる
     let surface = RawgenzoTools.makeSurface(workspace: RawgenzoWorkspace(folder: folder, engine: engine))
     let server = MCPServer(surface: surface)
     server.onToolCall = { logCall($0, via: "rawdev") }
+    let router = MCPRouter(local: server, preamble: [RawgenzoBridge.handshake(folder: folder)]) {
+        UnixSocketBridge.connect(path: RawgenzoBridge.socketPath)
+    }
+    router.onRemoteToolCall = { logCall($0, via: "app") }
+    router.onSwitch = { logError("[rawgenzo] \($0)") }
     logError("[rawgenzo] MCP サーバーを開始: \(folder.path)(\((try? engine.listCandidates(in: folder).count) ?? 0) 枚)")
-    server.run()
+    router.run()
 
 case "config":
     let path = RawgenzoPaths.configFile.path

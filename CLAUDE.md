@@ -69,7 +69,8 @@ Sources/OperationSurface/   AI などに操作を委ねる汎用の操作面(Fou
   Tool                      Effect(影響の段階)、ToolDescriptor、ToolResult、Caller、ToolContext(取り消しの登録)
   Surface                   道具の登録と呼び出し(検証 → 権限 → 実行 → 監査ログ)、主体ごとの取り消し、汎用の道具(undo 等)
   MCPServer                 操作面を MCP サーバー(stdio の JSON-RPC。tools だけ)として公開する。Foundation だけで自作
-  UnixSocket                起動中のアプリの操作面に別プロセスからつなぐ Unix ソケット(0600)と、stdio ⇄ ソケットの中継
+  UnixSocket                起動中のアプリの操作面に別プロセスからつなぐ Unix ソケット(0600)
+  MCPRouter                 MCP のメッセージを、起動中のアプリ(ソケットの先)か自分の操作面かに、メッセージごとに振り分ける
 Sources/RawgenzoSurface/    Rawgenzo の領域定義(RAWCore と OperationSurface を使う)
   RawgenzoWorkspace         作業フォルダと写真(ID = フォルダ内のファイル名。フォルダの外は指せない)
   RawgenzoTools             道具: list_photos / get_photo / get_stats / get_preview / adjust / solve_exposure
@@ -164,6 +165,10 @@ ARW → CameraRegistry が機種判定 → CameraProfile.makeSource → RAWSourc
 - 道具の一覧は登録順で返す(AI 側のプロンプトキャッシュを効かせるため。並びを毎回変えない)
 - **アプリとの橋渡し**: 設定「AI からの操作を受け付ける」(config.json の `agent.enabled`、既定オフ)がオンだと、
   アプリが `~/.Rawgenzo/agent.sock` で受け付け、`rawdev mcp` はそこへ中継する(つながらなければ自分で処理)。
+  つながるかはメッセージのたびに確かめる(`MCPRouter`)。最初の版は起動時に 1 回だけ確かめていて、AI の会話の途中でアプリを
+  起動しても中継に切り替わらなかった。アプリに切り替えたときは initialize を送り直す。要求を送った後で接続が切れたら、
+  その要求は失敗として返し、自分で処理し直さない(アプリが処理済みなら二重に当たるため)。
+  取り消しの履歴はアプリと rawdev とで別々なので、切り替える前の変更は切り替えた後には取り消せない
   アプリで開いている写真は、AI が編集中の設定(未保存の変更を含む)を読み書きし、画面にその場で出る。
   AI の変更は `photo.settings` も同じ値にして「保存済み」として扱う(サイドカーは AI の側が書く)ので、アプリの自動保存が書き直さない。
   人の変更は `flushSave` で実際に保存したときだけ `noteHumanChange` で記録する(AI の取り消しを断る判断に使う)

@@ -422,3 +422,70 @@ final class MCPServerTests: XCTestCase {
         XCTAssertEqual(size.1, 256)
     }
 }
+
+/// MCPRouter: メッセージのたびに、起動中のアプリ(ソケットの先)か自分かに振り分ける
+final class MCPRouterTests: XCTestCase {
+    final class Counter { var value = 0 }
+
+    private func makeSurface(_ c: Counter) -> Surface {
+        let s = Surface(name: "counter", version: "1")
+        s.register(ToolDescriptor(name: "add", title: "足す", description: "足す",
+                                  input: .object([.init("amount", .integer())], required: ["amount"]),
+                                  effect: .modify)) { args, _ in
+            c.value += args["amount"]!.intValue!
+            return .text("\(c.value)")
+        }
+        return s
+    }
+
+    private func call(_ id: Int, _ amount: Int) -> String {
+        #"{"jsonrpc":"2.0","id":\#(id),"method":"tools/call","params":{"name":"add","arguments":{"amount":\#(amount)}}}"#
+    }
+
+    func testSwitchesWhenTheAppStartsAndStops() throws {
+        let localCount = Counter(), appCount = Counter()
+        let appSurface = makeSurface(appCount)
+        let path = "/tmp/rg-router-\(UUID().uuidString.prefix(8)).sock"
+        let queue = DispatchQueue(label: "test.app")
+        var appCallers: [Caller] = []
+        let app = UnixSocketServer(path: path, handlerQueue: queue) {
+            var mcp: MCPServer?
+            return { line in
+                if line.contains("test/hello") { mcp = MCPServer(surface: appSurface); return nil }   // 前置きの知らせ
+                defer { if let c = mcp?.caller { appCallers.append(c) } }
+                return mcp?.handle(line: line)
+            }
+        }
+        let router = MCPRouter(local: MCPServer(surface: makeSurface(localCount)),
+                               preamble: [#"{"jsonrpc":"2.0","method":"test/hello"}"#]) {
+            UnixSocketBridge.connect(path: path)
+        }
+        var remoteCalls = 0
+        router.onRemoteToolCall = { _ in remoteCalls += 1 }
+
+        XCTAssertNotNil(router.handle(line: #"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"clientInfo":{"name":"c"}}}"#))
+        XCTAssertNil(router.handle(line: #"{"jsonrpc":"2.0","method":"notifications/initialized"}"#))
+
+        // アプリが居ない → 自分で処理
+        _ = router.handle(line: call(2, 1))
+        XCTAssertEqual(localCount.value, 1)
+        XCTAssertFalse(router.isRemote)
+
+        // 会話の途中でアプリが起動 → 次の呼び出しからアプリへ。initialize が送り直され、アプリ側でも主体が分かる
+        try app.start()
+        let r = try XCTUnwrap(router.handle(line: call(3, 10)))
+        XCTAssertTrue(r.contains(#""id":3"#), r)
+        XCTAssertEqual(appCount.value, 10)
+        XCTAssertEqual(localCount.value, 1)
+        XCTAssertTrue(router.isRemote)
+        XCTAssertEqual(appCallers.last, .agent("mcp:c"))
+        XCTAssertEqual(remoteCalls, 1)
+
+        // アプリが終了 → 次の呼び出しは自分で処理
+        app.stop()
+        _ = router.handle(line: call(4, 100))
+        XCTAssertEqual(localCount.value, 101)
+        XCTAssertEqual(appCount.value, 10)
+        XCTAssertFalse(router.isRemote)
+    }
+}

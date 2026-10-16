@@ -7,7 +7,7 @@ import Darwin
 /// 1 行 1 メッセージ(JSON-RPC)でやり取りする。ネットワークには出ず、ソケットのファイルは本人だけが読み書きできる(0600)。
 ///
 /// GUI を持つソフトは「操作面を持ち、このソケットで受け付ける」だけで、MCP クライアントから
-/// 「stdio ⇄ ソケットの中継」(UnixSocketBridge.relay)を通して操作できるようになる
+/// 振り分け(MCPRouter。起動中ならソケットの先へ、居なければ自分で処理)を通して操作できるようになる
 public final class UnixSocketServer {
     public enum ServerError: Error, CustomStringConvertible {
         case inUse(String)
@@ -109,7 +109,7 @@ public final class UnixSocketServer {
     }
 }
 
-/// ソケットの小道具と、stdio ⇄ ソケットの中継
+/// ソケットの小道具
 public enum UnixSocketBridge {
     static func address(_ path: String) throws -> sockaddr_un {
         var addr = sockaddr_un()
@@ -169,32 +169,5 @@ public enum UnixSocketBridge {
             offset += n
         }
         return true
-    }
-
-    /// 標準入出力とソケットを中継する(どちらかが閉じたら終わる)。
-    /// - first: 中継を始める前にソケットへ送る行(作業フォルダの知らせなど)
-    /// - observe: 行が通るたびに呼ぶ(toServer = クライアント → アプリ)。記録用
-    public static func relay(fd: Int32, first: [String] = [], observe: ((String, Bool) -> Void)? = nil) {
-        for line in first { write(fd, line + "\n") }
-        // 終わりはソケットの読み取りで決める: 標準入力が閉じたら書き込みだけ閉じ、アプリが残りの返事を送り終えて
-        // 閉じるまで待つ(先に閉じると最後の返事を取りこぼす)。アプリが先に閉じたら、標準入力を待たずに終わる
-        let done = DispatchSemaphore(value: 0)
-        Thread.detachNewThread {
-            readLines(fd) { line in
-                observe?(line, false)
-                FileHandle.standardOutput.write(Data((line + "\n").utf8))
-                return true
-            }
-            done.signal()
-        }
-        Thread.detachNewThread {
-            while let line = readLine(strippingNewline: true) {
-                observe?(line, true)
-                if !write(fd, line + "\n") { break }
-            }
-            shutdown(fd, SHUT_WR)
-        }
-        done.wait()
-        close(fd)
     }
 }
