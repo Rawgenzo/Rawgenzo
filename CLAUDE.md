@@ -74,7 +74,7 @@ Sources/OperationSurface/   AI などに操作を委ねる汎用の操作面(Fou
 Sources/RawgenzoSurface/    Rawgenzo の領域定義(RAWCore と OperationSurface を使う)
   RawgenzoWorkspace         作業フォルダと写真(ID = 作業フォルダの中ならファイル名、外なら RAW ファイルの絶対パス)
   RawgenzoTools             道具: get_app_state / list_photos / get_photo / get_stats / get_preview / adjust / set_crop /
-                            list_looks / set_look / solve_exposure
+                            list_looks / set_look / set_lens_correction / set_hdr_output / reset_settings / solve_exposure
                             (+ undo / recent_operations)
   RawgenzoAgentHost         アプリの中でソケット(~/.Rawgenzo/agent.sock)を受け、作業フォルダごとの操作面につなぐ。
                             RawgenzoBridge(中継との決まり: 最初の通知 rawgenzo/workspace で作業フォルダを知らせる)
@@ -201,6 +201,9 @@ ARW → CameraRegistry が機種判定 → CameraProfile.makeSource → RAWSourc
 - **ルック(list_looks / set_look)**: 「シネマ調に」と頼まれた AI は、ルックを選べなかったので色の値を adjust で作った
   (2026-10-16 の試験)。AI がルックを選べるよう、`Look.summary`(見た目の説明)を持たせた。.cube のルックは説明が無い。
   get_preview の `look` で保存せずに試せる。強さを替えてもルックは保ち、ルックを替えても強さは保つ(アプリと同じ)
+- **レンズ補正(set_lens_correction)** はアプリと同じく、今掛かっている補正(カメラ設定に従っていればその値)から始めて
+  渡した項目だけを変える。補正情報の無いレンズの写真は変えずに notes で知らせる(まとめて頼まれたとき全体を断らない)。
+  reset_settings はアプリの「すべて初期値に戻す」と同じ(`initialSettings`)。keep で切り抜き・ルックを残せる
 - **`JSONValue` は nil リテラルで `.null` になる**(`ExpressibleByNilLiteral`)。「指定なし」と「null(無しにする)」を
   分けるときに `cond ? x : nil` と書くと、指定なしが `.null` になる。`JSONValue?` を明示して `.none` を使う
   (set_look で、強さだけの指定がルックを外した)
@@ -317,6 +320,6 @@ README.md(利用者向けの説明)も合わせて更新する。
 - `config.json` を外部で編集した場合は手動で「ファイルから読み直す」が必要(ファイル監視なし)
 - アプリ内チャット(AI をアプリに内蔵する。API キーを預かる形)は 2026-10-16 にオーナーが「一旦見送り」と判断。
   検討の内容・認証の流れ・ChatGPT 対応の考え方・再開するときの進め方は `docs/ai-in-app-chat.md`
-- AI から操作できないもの: 書き出し・レンズ補正・HDR 出力・写真を開く。取り消しの履歴はアプリと rawdev とで別々
+- AI から操作できないもの: 書き出し・写真を開く(アプリの表示を変える)。取り消しの履歴はアプリと rawdev とで別々
 - スライダーを初期値に戻すのは右端の「↶」ボタンだけ。Lightroom のように名前のダブルクリックで戻す操作は無い
   (2026-10-07 にオーナーが「今は見送り」と判断)

@@ -441,7 +441,11 @@ final class EditorModel: ObservableObject {
         if oldCrop.angle != newCrop.angle { changed.insert("crop.angle") }
         if settings.look?.id != new.look?.id { changed.insert("look.style") }
         if let a = settings.look, let b = new.look, a.id == b.id, a.strength != b.strength { changed.insert("look.strength") }
-        if settings.lens != new.lens { changed.insert("lens") }
+        // レンズ補正は、実際に掛かる補正が変わった項目だけ(カメラ設定に従う ⇔ 同じ値の指定、は光らせない)
+        let (oldLens, newLens) = (photo.effectiveLensSettings(settings), photo.effectiveLensSettings(new))
+        if oldLens?.vignetting != newLens?.vignetting { changed.insert("lens.vignetting") }
+        if oldLens?.distortion != newLens?.distortion { changed.insert("lens.distortion") }
+        if oldLens?.chromaticAberration != newLens?.chromaticAberration { changed.insert("lens.chromaticAberration") }
         if settings.hdr.extendedOutput != new.hdr.extendedOutput { changed.insert("hdr.extendedOutput") }
         photo.settings = new
         settings = new
@@ -485,6 +489,9 @@ final class EditorModel: ObservableObject {
         case "set_crop": what = "\(task)切り抜きを変更しました"
         case "list_looks": what = "ルックの一覧を見ています"
         case "set_look": what = "\(task)ルックを変更しました"
+        case "set_lens_correction": what = "\(task)レンズ補正を変更しました"
+        case "set_hdr_output": what = "\(task)HDR 出力を変更しました"
+        case "reset_settings": what = "\(task)設定を初期値に戻しました"
         default: what = "\(task)写真を変更しました"
         }
         agentActivity = AgentActivity(message: "AI(\(who))が\(what)\(r.isError ? "(失敗)" : "")", date: Date())

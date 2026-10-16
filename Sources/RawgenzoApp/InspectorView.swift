@@ -51,6 +51,7 @@ struct InspectorView: View {
         InspectorSection("HDR", id: .hdr) {
             parameterSliders(.hdr, photo)
             Toggle("HDRディスプレイ向けに出力", isOn: $model.settings.hdr.extendedOutput)
+                .modifier(AgentHighlight(isOn: model.agentHighlights.contains("hdr.extendedOutput")))
             if model.settings.hdr.extendedOutput {
                 Text("書き出しは10bit HEIFになります。プレビューは通常の明るさで表示されます。")
                     .font(.caption).foregroundStyle(.secondary)
@@ -101,8 +102,11 @@ struct InspectorView: View {
         InspectorSection("レンズ補正", id: .lens) {
             if photo.lensCorrection != nil {
                 Toggle("周辺減光", isOn: lensBinding(photo, \.vignetting))
+                    .modifier(AgentHighlight(isOn: model.agentHighlights.contains("lens.vignetting")))
                 Toggle("歪曲", isOn: lensBinding(photo, \.distortion))
+                    .modifier(AgentHighlight(isOn: model.agentHighlights.contains("lens.distortion")))
                 Toggle("倍率色収差", isOn: lensBinding(photo, \.chromaticAberration))
+                    .modifier(AgentHighlight(isOn: model.agentHighlights.contains("lens.chromaticAberration")))
                 HStack {
                     Text(model.settings.lens == nil ? "撮影時のカメラの設定に従っています" : "この写真用に変更しています")
                         .font(.caption).foregroundStyle(.secondary)
