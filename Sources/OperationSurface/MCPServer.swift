@@ -93,7 +93,7 @@ public final class MCPServer {
                 "capabilities": ["tools": ["listChanged": false]],
                 "serverInfo": ["name": .string(surface.name), "version": .string(surface.version)],
             ]
-            if !surface.instructions.isEmpty { result["instructions"] = .string(surface.instructions) }
+            if !surface.fullInstructions.isEmpty { result["instructions"] = .string(surface.fullInstructions) }
             return .object(result)
         case "ping":
             return .object([:])

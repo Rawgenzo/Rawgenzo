@@ -36,6 +36,8 @@ public struct AuditEntry: Sendable {
     public var tool: String
     public var arguments: JSONValue
     public var effect: Effect?
+    /// 作業名(状態を変える呼び出しに AI が付ける。人の 1 つの指示のまとまり)
+    public var task: String?
     public var outcome: Outcome
     public var summary: String
     public var durationMs: Int
@@ -53,6 +55,23 @@ public final class Surface {
     public let version: String
     /// AI への最初の説明(このソフトで何ができるか、道具の使い方の方針)
     public var instructions: String
+
+    /// どのソフトでも同じ、操作のしかたの決まり(作業名と取り消し、頼まれていないことをしない)。
+    /// registerStandardTools() を呼んだとき、AI への説明(fullInstructions)に付け足す
+    public static let standardGuidance = """
+        操作の決まり:
+        - 状態を変える道具には task(作業名)を付けられる。人の 1 つの指示のために何回か変更するときは、
+          すべての呼び出しに同じ task(その指示を短く表す名前。例「明るさを揃える」)を付ける。
+          undo は最後の作業(同じ task の変更すべて)をまとめて取り消す。task の無い変更は 1 回の呼び出しごとに取り消す
+        - 頼まれていない項目は変えない。目標に届かないときは、別の項目で無理に合わせず、結果を人に伝えて判断を仰ぐ
+        """
+
+    /// AI に渡す説明の全体(ソフトの説明 + 汎用の決まり)
+    public var fullInstructions: String {
+        guard hasStandardTools else { return instructions }
+        return instructions.isEmpty ? Self.standardGuidance : instructions + "\n\n" + Self.standardGuidance
+    }
+    private var hasStandardTools = false
 
     private var tools: [String: Tool] = [:]
     /// 登録順(道具の一覧を毎回同じ順で返す。AI 側のプロンプトキャッシュを効かせるため)
@@ -74,6 +93,7 @@ public final class Surface {
     private struct Transaction {
         var caller: Caller
         var tool: String
+        var task: String?
         var actions: [UndoStep]
         var resources: Set<String> { Set(actions.map(\.resource)) }
     }
@@ -89,12 +109,23 @@ public final class Surface {
 
     // MARK: - 道具の登録
 
+    /// 作業名(task)の引数を自動で足した道具。この道具の処理には task を渡さない
+    private var taskTools: Set<String> = []
+
+    /// 道具を登録する。状態を変える道具(modify 以上)には、作業名の引数 task を自動で足す
     public func register(_ tool: Tool) {
+        var tool = tool
         let name = tool.descriptor.name
         precondition(tools[name] == nil, "道具の名前が重なっています: \(name)")
+        if tool.descriptor.effect >= .modify, !tool.descriptor.input.properties.contains(where: { $0.name == "task" }) {
+            tool.descriptor.input.properties.append(.init("task", .string(Self.taskDescription)))
+            taskTools.insert(name)
+        }
         tools[name] = tool
         order.append(name)
     }
+
+    static let taskDescription = "作業名。人の 1 つの指示のために何回か変更するときは、同じ作業名を付ける(undo でまとめて取り消せる)"
 
     public func register(_ descriptor: ToolDescriptor,
                          handler: @escaping (JSONValue, ToolContext) throws -> ToolResult) {
@@ -121,9 +152,11 @@ public final class Surface {
         let start = Date()
         let args = arguments.isNull ? JSONValue.object([:]) : arguments
 
+        let task = taskTools.contains(name) ? args["task"]?.stringValue : nil
+
         func finish(_ result: ToolResult, _ outcome: AuditEntry.Outcome, effect: Effect?, undoable: Bool = false) -> ToolResult {
             record(AuditEntry(sequence: 0, date: start, caller: caller, tool: name, arguments: args,
-                              effect: effect, outcome: outcome, summary: result.summary,
+                              effect: effect, task: task, outcome: outcome, summary: result.summary,
                               durationMs: Int(Date().timeIntervalSince(start) * 1000), undoable: undoable))
             return result
         }
@@ -154,15 +187,21 @@ public final class Surface {
         }
 
         let context = ToolContext(caller: caller, descriptor: d)
+        // 作業名は操作面が扱うので、道具の処理には渡さない
+        var handlerArgs = args
+        if taskTools.contains(name), case .object(var o) = args {
+            o["task"] = nil
+            handlerArgs = .object(o)
+        }
         do {
-            let result = try tool.handler(args, context)
+            let result = try tool.handler(handlerArgs, context)
             if result.isError {
                 rollBack(context)
                 return finish(result, .failed, effect: d.effect)
             }
             let undoable = !context.undoActions.isEmpty
             if undoable {
-                undoStack.append(Transaction(caller: caller, tool: name, actions: context.undoActions))
+                undoStack.append(Transaction(caller: caller, tool: name, task: task, actions: context.undoActions))
                 if undoStack.count > undoLimit { undoStack.removeFirst(undoStack.count - undoLimit) }
             }
             return finish(result, .succeeded, effect: d.effect, undoable: undoable)
@@ -191,29 +230,70 @@ public final class Surface {
     public enum UndoError: Error, CustomStringConvertible {
         /// 後から別の主体が同じものを変えている
         case conflict(resource: String, laterCaller: Caller)
+        /// 後から自分の別の作業で同じものを変えている(先にそちらを取り消す必要がある)
+        case laterOwnChange(resource: String, task: String?)
+        /// その作業名の変更が無い
+        case noSuchTask(String)
 
         public var description: String {
             switch self {
             case .conflict(let r, let c):
                 return "後から \(c) が同じ対象(\(r))を変更しているので取り消せません"
+            case .laterOwnChange(let r, let task):
+                let name = task.map { "作業「\($0)」" } ?? "別の変更"
+                return "後から自分の\(name)で同じ対象(\(r))を変更しているので取り消せません。先にそちらを取り消してください"
+            case .noSuchTask(let t):
+                return "作業「\(t)」の取り消せる変更がありません"
             }
         }
     }
 
-    /// この主体が最後に行った取引を取り消す。戻り値は取り消した道具の名前(無ければ nil)。
-    /// その取引の後に別の主体が同じ対象を変えていたら UndoError.conflict を投げ、何も変えない
+    public struct UndoOutcome: Equatable {
+        /// 取り消した取引の数
+        public var count: Int
+        /// 取り消した作業名(作業名の無い変更なら nil)
+        public var task: String?
+        /// 取り消した道具の名前(新しい順)
+        public var tools: [String]
+    }
+
+    /// この主体の最後の作業を取り消す。最後の取引に作業名があれば、同じ作業名の取引をすべて取り消す。
+    /// task を渡せば、その作業名の取引をすべて取り消す。何も無ければ nil。
+    /// 取り消す取引より後に、取り消さない取引(別の主体・自分の別の作業)が同じ対象を変えていたら、何も変えずに例外を投げる
+    /// (取り消しは「変える前の値に戻す」なので、戻すと後の変更まで消えるため)
     @discardableResult
-    public func undoLast(by caller: Caller) throws -> String? {
-        guard let index = undoStack.lastIndex(where: { $0.caller == caller }) else { return nil }
-        let t = undoStack[index]
-        for later in undoStack[(index + 1)...] where later.caller != caller {
-            if let shared = t.resources.intersection(later.resources).sorted().first {
-                throw UndoError.conflict(resource: shared, laterCaller: later.caller)
+    public func undo(by caller: Caller, task: String? = nil) throws -> UndoOutcome? {
+        let mine = undoStack.indices.filter { undoStack[$0].caller == caller }
+        guard let last = mine.last else {
+            if let task { throw UndoError.noSuchTask(task) }
+            return nil
+        }
+        let label = task ?? undoStack[last].task
+        let targets = label == nil ? [last] : mine.filter { undoStack[$0].task == label }
+        if targets.isEmpty, let task { throw UndoError.noSuchTask(task) }
+        let targetSet = Set(targets)
+        for i in targets {
+            for j in (i + 1)..<undoStack.count where !targetSet.contains(j) {
+                let later = undoStack[j]
+                if let shared = undoStack[i].resources.intersection(later.resources).sorted().first {
+                    if later.caller == caller { throw UndoError.laterOwnChange(resource: shared, task: later.task) }
+                    throw UndoError.conflict(resource: shared, laterCaller: later.caller)
+                }
             }
         }
-        undoStack.remove(at: index)
-        for step in t.actions.reversed() { try step.action() }
-        return t.tool
+        var tools: [String] = []
+        for i in targets.sorted(by: >) {
+            for step in undoStack[i].actions.reversed() { try step.action() }
+            tools.append(undoStack[i].tool)
+            undoStack.remove(at: i)
+        }
+        return UndoOutcome(count: targets.count, task: label, tools: tools)
+    }
+
+    /// この主体が最後に行った作業を取り消す(undo(by:task:) の簡易版)。戻り値は最後に取り消した道具の名前
+    @discardableResult
+    public func undoLast(by caller: Caller) throws -> String? {
+        try undo(by: caller)?.tools.first
     }
 
     /// この主体が取り消せる取引の数
@@ -223,15 +303,20 @@ public final class Surface {
 
     /// 汎用の道具(取り消し・操作の履歴)を登録する。どのソフトでも同じ形で AI に見せる
     public func registerStandardTools() {
+        hasStandardTools = true
         register(ToolDescriptor(
             name: "undo", title: "取り消す",
-            description: "自分が最後に行った変更を 1 つ取り消す。1 回の道具の呼び出しで行った変更はまとめて取り消される。"
+            description: "自分が最後に行った作業を取り消す。作業名(task)の付いた変更は、同じ作業名の変更をまとめて取り消す。"
+                + "作業名の無い変更は 1 回の呼び出しの分を取り消す。task を渡すとその作業を取り消す。"
                 + "人や他のエージェントの変更は取り消さない",
-            effect: .modify)) { [unowned self] _, context in
-            let undone: String?
-            do { undone = try self.undoLast(by: context.caller) } catch { return .error("\(error)") }
-            guard let tool = undone else { return .error("取り消せる変更がありません") }
-            return .text("「\(self.tools[tool]?.descriptor.title ?? tool)」の変更を取り消しました(残り \(self.undoCount(for: context.caller)) 件)")
+            input: .object([.init("task", .string("取り消す作業名(省略すると最後の作業)"))]),
+            effect: .modify)) { [unowned self] args, context in
+            let outcome: UndoOutcome?
+            do { outcome = try self.undo(by: context.caller, task: args["task"]?.stringValue) } catch { return .error("\(error)") }
+            guard let outcome else { return .error("取り消せる変更がありません") }
+            let what = outcome.task.map { "作業「\($0)」の変更 \(outcome.count) 件" }
+                ?? "「\(self.tools[outcome.tools[0]]?.descriptor.title ?? outcome.tools[0])」の変更"
+            return .text("\(what)を取り消しました(残り \(self.undoCount(for: context.caller)) 件)")
         }
         register(ToolDescriptor(
             name: "recent_operations", title: "操作の履歴",
@@ -253,6 +338,7 @@ public final class Surface {
                         "seq": .number(Double(e.sequence)),
                         "caller": .string(e.caller.description),
                         "tool": .string(e.tool),
+                        "task": e.task.map { .string($0) } ?? .null,
                         "arguments": .string(short(e.arguments.jsonString())),
                         "outcome": .string(e.outcome.rawValue),
                         "undoable": .bool(e.undoable),

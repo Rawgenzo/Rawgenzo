@@ -175,9 +175,13 @@ public struct ExposureSolver {
         let luminanceMet = !wantsLuminance || abs(target.luminance(final)!) <= target.tolerance
         let clippingMet = maxClip.map { final.highlightClipping <= $0 } ?? true
         if !luminanceMet, notes.isEmpty {
+            // 探すのは露出とハイライト回復だけ。それ以外の項目で無理に合わせるかは人が決める(2026-10-16 の試験で、
+            // AI が頼まれていない HDR の項目を試し、白飛びを 5% に増やした)。代わりの手段と副作用を伝えて判断を促す
             notes.append(target.luminance(final)! < 0
-                         ? "露出を上限まで上げても目標の明るさに届かない"
-                         : "露出を下限まで下げても目標の明るさより明るい")
+                         ? "露出を上限まで上げても目標の明るさに届かない。HDR のシャドウ持ち上げ(hdr.shadows)や強さ(hdr.strength)で"
+                           + "さらに明るくできるが、白飛びやノイズが増えやすい。使うかどうかは人に確認すること"
+                         : "露出を下限まで下げても目標の明るさより明るい。ハイライト回復(hdr.highlights)やコントラストで"
+                           + "明るい部分を抑えられるが、見た目が変わる。使うかどうかは人に確認すること")
         }
         if !clippingMet { notes.append("露出を下限まで下げても白飛びが上限を超える") }
         return Result(settings: settings, stats: final, luminanceMet: luminanceMet, clippingMet: clippingMet,

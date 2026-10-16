@@ -199,6 +199,75 @@ final class SurfaceTests: XCTestCase {
         XCTAssertFalse(s2.call("undo", as: ai).isError, "別の対象なら取り消せる")
     }
 
+    /// 状態を変える道具にだけ作業名(task)の引数が足され、道具の処理には渡らない
+    func testTaskArgumentIsAddedToModifyToolsOnly() {
+        let s = makeSurface(Counter())
+        var seen: JSONValue?
+        s.register(ToolDescriptor(name: "spy", title: "覗く", description: "引数を覚える", effect: .modify)) { args, _ in
+            seen = args
+            return .text("ok")
+        }
+        func has(_ tool: String) -> Bool { s.descriptors.first { $0.name == tool }!.input.properties.contains { $0.name == "task" } }
+        XCTAssertTrue(has("add"))
+        XCTAssertTrue(has("spy"))
+        XCTAssertFalse(has("get"), "読むだけの道具には付けない")
+        XCTAssertTrue(has("undo"), "undo は自前の task(取り消す作業名)を持つ")
+        XCTAssertFalse(s.call("spy", arguments: ["task": "試し"], as: ai).isError)
+        XCTAssertEqual(seen, .object([:]), "task は道具の処理に渡さない")
+        XCTAssertEqual(s.auditLog.last?.task, "試し")
+    }
+
+    /// undo は最後の作業(同じ作業名の取引すべて)をまとめて戻す。作業名の無い取引は 1 つずつ
+    func testUndoGroupsByTask() throws {
+        let counter = Counter()
+        let s = makeSurface(counter)
+        _ = s.call("add", arguments: ["amount": 1, "task": "揃える"], as: ai)
+        _ = s.call("add", arguments: ["amount": 10, "task": "揃える"], as: ai)     // 11
+        _ = s.call("add", arguments: ["amount": 100, "task": "仕上げ"], as: ai)    // 111
+        _ = s.call("add", arguments: ["amount": 2, "task": "仕上げ"], as: ai)      // 113
+        let r1 = s.call("undo", as: ai)
+        XCTAssertFalse(r1.isError)
+        XCTAssertTrue(r1.summary.contains("作業「仕上げ」の変更 2 件"), r1.summary)
+        XCTAssertEqual(counter.value, 11)
+        XCTAssertFalse(s.call("undo", as: ai).isError)
+        XCTAssertEqual(counter.value, 0)
+
+        _ = s.call("add", arguments: ["amount": 5], as: ai)
+        _ = s.call("add", arguments: ["amount": 7], as: ai)
+        XCTAssertFalse(s.call("undo", as: ai).isError)
+        XCTAssertEqual(counter.value, 5, "作業名の無い変更は 1 つずつ")
+    }
+
+    /// 作業名を指定して取り消す。後から自分の別の作業が同じ対象を変えていれば断る(戻すとその変更まで消えるため)
+    func testUndoByTaskName() throws {
+        let counter = Counter()
+        let s = makeSurface(counter)
+        _ = s.call("add", arguments: ["amount": 1, "task": "A", "target": "x"], as: ai)
+        _ = s.call("add", arguments: ["amount": 10, "task": "B", "target": "y"], as: ai)
+        // (この小さなソフトは値を 1 つしか持たないので、対象の名前だけ分けている。値ではなく取引の数で確かめる)
+        XCTAssertFalse(s.call("undo", arguments: ["task": "A"], as: ai).isError, "別の対象なら取り消せる")
+        XCTAssertEqual(s.undoCount(for: ai), 1, "B は残る")
+        XCTAssertTrue(s.call("undo", arguments: ["task": "A"], as: ai).isError, "もう無い")
+
+        let c2 = Counter()
+        let s2 = makeSurface(c2)
+        _ = s2.call("add", arguments: ["amount": 1, "task": "A"], as: ai)
+        _ = s2.call("add", arguments: ["amount": 10, "task": "B"], as: ai)
+        let r = s2.call("undo", arguments: ["task": "A"], as: ai)
+        XCTAssertTrue(r.isError)
+        XCTAssertTrue(r.summary.contains("作業「B」"), r.summary)
+        XCTAssertEqual(c2.value, 11, "何も変えない")
+    }
+
+    func testStandardGuidanceIsAddedToInstructions() {
+        let s = Surface(name: "x", version: "1", instructions: "ソフトの説明")
+        XCTAssertEqual(s.fullInstructions, "ソフトの説明")
+        s.registerStandardTools()
+        XCTAssertTrue(s.fullInstructions.hasPrefix("ソフトの説明"))
+        XCTAssertTrue(s.fullInstructions.contains("task"))
+        XCTAssertTrue(s.fullInstructions.contains("頼まれていない項目は変えない"))
+    }
+
     /// 途中で失敗した呼び出しは、それまでの変更をその場で戻し、取り消しの履歴にも残さない
     func testFailedCallIsRolledBack() {
         let counter = Counter()
