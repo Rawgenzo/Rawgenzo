@@ -1,0 +1,152 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1040 720" width="1040" height="720" role="img">
+<title>AI が Rawgenzo を操作するときの配置と通信の向き</title>
+<style>
+text{font-family:"Hiragino Sans","Hiragino Kaku Gothic ProN","Yu Gothic","Noto Sans CJK JP","Noto Sans JP",sans-serif;fill:#1C2225}
+.m{fill:#5B656A} .mono{font-family:Menlo,"SF Mono",Consolas,monospace} .b{font-weight:700}
+.hbox{fill:#DCEAF0;stroke:#1F5F7A;stroke-width:1.5}
+.abox{fill:#F6E9D5;stroke:#B8700F;stroke-width:1.5}
+.rbox{fill:#DDEEE2;stroke:#2F7449;stroke-width:1.5}
+.pbox{fill:#E4E8EA;stroke:#4E5A60;stroke-width:1.5}
+.inner{fill:#FFFFFF;stroke:#C7CED0;stroke-width:1.2}
+.mac{fill:none;stroke:#5B656A;stroke-width:1.4;stroke-dasharray:7 5}
+.th{fill:#1F5F7A} .ta{fill:#B8700F} .tr{fill:#2F7449} .tp{fill:#4E5A60}
+.lh{stroke:#1F5F7A;stroke-width:2;fill:none} .la{stroke:#B8700F;stroke-width:2;fill:none}
+.lr{stroke:#2F7449;stroke-width:2;fill:none} .lp{stroke:#4E5A60;stroke-width:2;fill:none}
+.ret{stroke-dasharray:6 4} .life{stroke:#C7CED0;stroke-width:1.4;stroke-dasharray:3 4}
+.num{fill:#1C2225} .numt{fill:#FFFFFF;font-family:Menlo,"SF Mono",Consolas,monospace;font-size:11px;font-weight:500}
+.fh{fill:#1F5F7A} .fa{fill:#B8700F} .fr{fill:#2F7449} .fp{fill:#4E5A60} .fm{fill:#5B656A}
+</style>
+<rect x="0" y="0" width="1040" height="720" fill="#FFFFFF"/>
+<defs>
+      <marker id="mh" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="fh"/></marker>
+      <marker id="ma" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="fa"/></marker>
+      <marker id="mr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="fr"/></marker>
+      <marker id="mp" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="fp"/></marker>
+    </defs>
+
+    <!-- Mac の枠 -->
+    <rect x="206" y="14" width="620" height="694" rx="12" class="mac"/>
+    <text x="222" y="38" class="m b" font-size="13">あなたの Mac</text>
+
+    <!-- ユーザ -->
+    <rect x="16" y="66" width="140" height="78" rx="8" class="hbox"/>
+    <text x="86" y="100" text-anchor="middle" class="th b" font-size="16">ユーザ</text>
+    <text x="86" y="122" text-anchor="middle" class="m" font-size="12">人</text>
+
+    <!-- AI(クラウド) -->
+    <rect x="852" y="56" width="172" height="120" rx="40" class="abox"/>
+    <text x="938" y="98" text-anchor="middle" class="ta b" font-size="16">AI(Claude)</text>
+    <text x="938" y="120" text-anchor="middle" font-size="12">Anthropic の API</text>
+    <text x="938" y="140" text-anchor="middle" class="m" font-size="12">クラウド</text>
+
+    <!-- Claude Code -->
+    <rect x="244" y="62" width="300" height="88" rx="8" class="pbox"/>
+    <text x="262" y="90" class="tp b" font-size="15">Claude Code</text>
+    <text x="262" y="112" font-size="12">MCP クライアント。会話の画面を持ち、</text>
+    <text x="262" y="130" font-size="12">AI と道具(MCP サーバー)を取り次ぐ</text>
+
+    <!-- ユーザ ⇄ Claude Code -->
+    <line x1="156" y1="92" x2="242" y2="92" class="lh" marker-end="url(#mh)"/>
+    <line x1="242" y1="120" x2="158" y2="120" class="lh ret" marker-end="url(#mh)"/>
+    <circle cx="199" cy="80" r="9" class="num"/><text x="199" y="84" text-anchor="middle" class="numt">1</text>
+    <circle cx="199" cy="134" r="9" class="num"/><text x="199" y="138" text-anchor="middle" class="numt">8</text>
+
+    <!-- Claude Code ⇄ AI -->
+    <line x1="544" y1="88" x2="850" y2="88" class="la" marker-end="url(#ma)"/>
+    <text x="586" y="80" font-size="12">会話・道具の一覧・道具の結果</text>
+    <line x1="850" y1="126" x2="546" y2="126" class="la ret" marker-end="url(#ma)"/>
+    <text x="586" y="146" font-size="12">文章、または道具の呼び出し(名前+引数)</text>
+    <circle cx="566" cy="76" r="9" class="num"/><text x="566" y="80" text-anchor="middle" class="numt">2</text>
+    <circle cx="566" cy="141" r="9" class="num"/><text x="566" y="145" text-anchor="middle" class="numt">3</text>
+    <text x="814" y="196" text-anchor="end" class="m" font-size="11.5">外向きの HTTPS だけ</text><text x="814" y="212" text-anchor="end" class="m" font-size="11.5">(外から Mac に入る接続はない)</text>
+
+    <!-- Claude Code ⇄ rawdev mcp(stdio) -->
+    <line x1="300" y1="150" x2="300" y2="262" class="lp" marker-end="url(#mp)"/>
+    <line x1="526" y1="262" x2="526" y2="152" class="lp ret" marker-end="url(#mp)"/>
+    <circle cx="300" cy="178" r="9" class="num"/><text x="300" y="182" text-anchor="middle" class="numt">4</text>
+    <text x="316" y="182" font-size="12">tools/call(道具名・引数・作業名)</text>
+    <text x="316" y="218" class="m" font-size="11.5">子プロセスとして起動し、標準入出力で</text>
+    <text x="316" y="234" class="m" font-size="11.5">1 行 1 メッセージの JSON-RPC</text>
+    <circle cx="526" cy="244" r="9" class="num"/><text x="526" y="248" text-anchor="middle" class="numt">7</text>
+
+    <!-- rawdev mcp -->
+    <rect x="244" y="264" width="300" height="118" rx="8" class="pbox"/>
+    <text x="262" y="292" class="tp b" font-size="15">rawdev mcp</text>
+    <text x="388" y="292" class="m mono" font-size="11">MCPRouter</text>
+    <text x="262" y="316" font-size="12">メッセージのたびに振り分ける</text>
+    <text x="262" y="338" font-size="12">・アプリが受け付けている → ソケットへ中継</text>
+    <text x="262" y="358" font-size="12">・受け付けていない → 自分の操作面で処理</text>
+    <text x="262" y="374" class="m" font-size="11">(道具・検証・取り消しはアプリと同じ部品)</text>
+
+    <!-- ファイル -->
+    <rect x="600" y="250" width="210" height="160" rx="8" class="inner"/>
+    <text x="616" y="276" class="b" font-size="14">ファイル</text>
+    <text x="616" y="300" class="mono" font-size="11">写真.ARW.rawgenzo.json</text>
+    <text x="616" y="316" class="m" font-size="11.5">サイドカー(現像設定)</text>
+    <text x="616" y="340" class="mono" font-size="11">~/.Rawgenzo/agent.sock</text>
+    <text x="616" y="356" class="m" font-size="11.5">アプリの受け口(本人だけ)</text>
+    <text x="616" y="380" class="mono" font-size="11">mcp-log.jsonl</text>
+    <text x="616" y="396" class="m" font-size="11.5">呼び出しの記録(rawdev が書く)</text>
+
+    <!-- rawdev → ファイル(アプリなし) -->
+    <line x1="544" y1="330" x2="598" y2="310" class="lp" marker-end="url(#mp)"/>
+    <text x="548" y="300" class="m" font-size="11">書く</text>
+
+    <!-- rawdev ⇄ アプリ(ソケット) -->
+    <line x1="300" y1="382" x2="300" y2="486" class="lp" marker-end="url(#mp)"/>
+    <line x1="526" y1="486" x2="526" y2="384" class="lp ret" marker-end="url(#mp)"/>
+    <circle cx="300" cy="410" r="9" class="num"/><text x="300" y="414" text-anchor="middle" class="numt">5</text>
+    <text x="316" y="414" font-size="12">同じ JSON-RPC をソケットで</text>
+    <text x="316" y="436" class="m" font-size="11.5">つないだ最初に作業フォルダを知らせ、</text>
+    <text x="316" y="452" class="m" font-size="11.5">initialize を送り直す</text>
+
+    <!-- Rawgenzo.app -->
+    <rect x="232" y="488" width="580" height="208" rx="10" class="rbox"/>
+    <text x="250" y="514" class="tr b" font-size="15">Rawgenzo.app</text>
+    <text x="384" y="514" class="m" font-size="12">設定「AI からの操作を受け付ける」がオンのとき</text>
+
+    <rect x="248" y="530" width="120" height="70" rx="6" class="inner"/>
+    <text x="260" y="554" class="b" font-size="12.5">受け口</text>
+    <text x="260" y="574" class="m mono" font-size="10.5">AgentHost</text>
+    <text x="260" y="590" class="m" font-size="11">フォルダごとに</text>
+
+    <rect x="384" y="530" width="150" height="70" rx="6" class="inner"/>
+    <text x="396" y="554" class="b" font-size="12.5">操作面 Surface</text>
+    <text x="396" y="574" font-size="11">検証→権限→実行</text>
+    <text x="396" y="590" font-size="11">監査ログ・取り消し</text>
+
+    <rect x="550" y="530" width="120" height="70" rx="6" class="inner"/>
+    <text x="562" y="554" class="b" font-size="12.5">道具</text>
+    <text x="562" y="574" class="m mono" font-size="10.5">RawgenzoTools</text>
+    <text x="562" y="590" class="m" font-size="11">adjust ほか 8 種</text>
+
+    <rect x="686" y="530" width="112" height="70" rx="6" class="inner"/>
+    <text x="698" y="554" class="b" font-size="12.5">現像エンジン</text>
+    <text x="698" y="574" class="m mono" font-size="10.5">RAWCore</text>
+    <text x="698" y="590" class="m" font-size="11">統計・探索</text>
+
+    <line x1="368" y1="565" x2="382" y2="565" class="lr" marker-end="url(#mr)"/>
+    <line x1="534" y1="565" x2="548" y2="565" class="lr" marker-end="url(#mr)"/>
+    <line x1="670" y1="565" x2="684" y2="565" class="lr" marker-end="url(#mr)"/>
+
+    <rect x="384" y="620" width="286" height="62" rx="6" class="inner"/>
+    <text x="396" y="644" class="b" font-size="12.5">編集画面 EditorModel</text>
+    <text x="396" y="664" font-size="11">開いている写真なら編集中の設定を差し替え、</text>
+    <text x="396" y="678" font-size="11">その場で再描画・変えたスライダーを強調</text>
+    <path d="M610 600 L610 618" class="lr" marker-end="url(#mr)"/>
+    <circle cx="626" cy="610" r="9" class="num"/><text x="626" y="614" text-anchor="middle" class="numt">6</text>
+    <path d="M430 620 L430 602" class="lr ret" marker-end="url(#mr)"/>
+    <text x="250" y="630" class="m" font-size="11">人の変更を記録</text>
+    <text x="250" y="645" class="m" font-size="11">(AI の取り消しを</text>
+    <text x="250" y="660" class="m" font-size="11">断る判断に使う)</text>
+
+    <!-- アプリ → サイドカー -->
+    <path d="M742 530 L742 412" class="lr" marker-end="url(#mr)"/>
+    <text x="750" y="470" class="tr" font-size="11.5">書く</text>
+
+    <!-- ユーザ ⇄ アプリ -->
+    <path d="M86 144 L86 650 L230 650" class="lh" marker-start="url(#mh)" marker-end="url(#mh)"/>
+    <text x="96" y="420" class="th" font-size="12">画面を見る</text>
+    <text x="96" y="438" class="th" font-size="12">スライダーを</text>
+    <text x="96" y="456" class="th" font-size="12">動かす</text>
+</svg>

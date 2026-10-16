@@ -1,0 +1,86 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1040 640" width="1040" height="640" role="img">
+<title>1 つの指示の流れ(明るさを揃える)</title>
+<style>
+text{font-family:"Hiragino Sans","Hiragino Kaku Gothic ProN","Yu Gothic","Noto Sans CJK JP","Noto Sans JP",sans-serif;fill:#1C2225}
+.m{fill:#5B656A} .mono{font-family:Menlo,"SF Mono",Consolas,monospace} .b{font-weight:700}
+.hbox{fill:#DCEAF0;stroke:#1F5F7A;stroke-width:1.5}
+.abox{fill:#F6E9D5;stroke:#B8700F;stroke-width:1.5}
+.rbox{fill:#DDEEE2;stroke:#2F7449;stroke-width:1.5}
+.pbox{fill:#E4E8EA;stroke:#4E5A60;stroke-width:1.5}
+.inner{fill:#FFFFFF;stroke:#C7CED0;stroke-width:1.2}
+.mac{fill:none;stroke:#5B656A;stroke-width:1.4;stroke-dasharray:7 5}
+.th{fill:#1F5F7A} .ta{fill:#B8700F} .tr{fill:#2F7449} .tp{fill:#4E5A60}
+.lh{stroke:#1F5F7A;stroke-width:2;fill:none} .la{stroke:#B8700F;stroke-width:2;fill:none}
+.lr{stroke:#2F7449;stroke-width:2;fill:none} .lp{stroke:#4E5A60;stroke-width:2;fill:none}
+.ret{stroke-dasharray:6 4} .life{stroke:#C7CED0;stroke-width:1.4;stroke-dasharray:3 4}
+.num{fill:#1C2225} .numt{fill:#FFFFFF;font-family:Menlo,"SF Mono",Consolas,monospace;font-size:11px;font-weight:500}
+.fh{fill:#1F5F7A} .fa{fill:#B8700F} .fr{fill:#2F7449} .fp{fill:#4E5A60} .fm{fill:#5B656A}
+</style>
+<rect x="0" y="0" width="1040" height="640" fill="#FFFFFF"/>
+<defs>
+      <marker id="sh" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="fh"/></marker>
+      <marker id="sa" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="fa"/></marker>
+      <marker id="sr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="fr"/></marker>
+      <marker id="sp" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="fp"/></marker>
+    </defs>
+    <!-- 登場人物の列: ユーザ 80 / Claude Code 290 / AI 500 / rawdev 720 / アプリ 940 -->
+    <rect x="20" y="14" width="120" height="40" rx="6" class="hbox"/><text x="80" y="39" text-anchor="middle" class="th b" font-size="13.5">ユーザ</text>
+    <rect x="220" y="14" width="140" height="40" rx="6" class="pbox"/><text x="290" y="39" text-anchor="middle" class="tp b" font-size="13.5">Claude Code</text>
+    <rect x="430" y="14" width="140" height="40" rx="20" class="abox"/><text x="500" y="39" text-anchor="middle" class="ta b" font-size="13.5">AI</text>
+    <rect x="650" y="14" width="140" height="40" rx="6" class="pbox"/><text x="720" y="39" text-anchor="middle" class="tp b" font-size="13.5">rawdev mcp</text>
+    <rect x="870" y="14" width="150" height="40" rx="6" class="rbox"/><text x="945" y="39" text-anchor="middle" class="tr b" font-size="13.5">Rawgenzo.app</text>
+    <line x1="80" y1="54" x2="80" y2="628" class="life"/>
+    <line x1="290" y1="54" x2="290" y2="628" class="life"/>
+    <line x1="500" y1="54" x2="500" y2="628" class="life"/>
+    <line x1="720" y1="54" x2="720" y2="628" class="life"/>
+    <line x1="945" y1="54" x2="945" y2="628" class="life"/>
+
+    <!-- 会話の始まり -->
+    <line x1="290" y1="84" x2="718" y2="84" class="lp" marker-end="url(#sp)"/>
+    <text x="300" y="78" font-size="11.5">会話の始まり: initialize / tools/list</text>
+    <line x1="720" y1="106" x2="292" y2="106" class="lp ret" marker-end="url(#sp)"/>
+    <text x="300" y="122" class="m" font-size="11.5">AI への説明(操作の決まりを含む)と、道具 8 種の名前・説明・入力の形(約 9,400 字)</text>
+
+    <!-- 1 -->
+    <line x1="80" y1="158" x2="288" y2="158" class="lh" marker-end="url(#sh)"/>
+    <text x="88" y="150" font-size="12">「全部の写真の明るさを</text>
+    <text x="88" y="176" font-size="12">平均輝度 0.45 に揃えて」</text>
+    <!-- 2 -->
+    <line x1="290" y1="196" x2="498" y2="196" class="la" marker-end="url(#sa)"/>
+    <text x="298" y="190" font-size="11.5">会話 + 道具の一覧</text>
+    <!-- 3 -->
+    <line x1="500" y1="224" x2="292" y2="224" class="la ret" marker-end="url(#sa)"/>
+    <text x="304" y="240" font-size="11.5" class="mono">list_photos {}</text>
+    <!-- 4,5 -->
+    <line x1="290" y1="256" x2="718" y2="256" class="lp" marker-end="url(#sp)"/>
+    <line x1="720" y1="256" x2="943" y2="256" class="lp" marker-end="url(#sp)"/>
+    <text x="730" y="250" class="m" font-size="11">ソケットで中継</text>
+    <!-- 結果 -->
+    <line x1="945" y1="282" x2="292" y2="282" class="lr ret" marker-end="url(#sr)"/>
+    <text x="560" y="298" font-size="11.5">6 枚の撮影情報(JSON 約 1KB)</text>
+    <line x1="290" y1="310" x2="498" y2="310" class="la" marker-end="url(#sa)"/>
+    <text x="298" y="304" font-size="11.5">道具の結果</text>
+
+    <!-- solve_exposure -->
+    <line x1="500" y1="338" x2="292" y2="338" class="la ret" marker-end="url(#sa)"/>
+    <text x="304" y="354" font-size="11" class="mono">solve_exposure {photos: 6 枚, target_mean_luminance: 0.45, task: "明るさを揃える"}</text>
+    <line x1="290" y1="372" x2="718" y2="372" class="lp" marker-end="url(#sp)"/>
+    <line x1="720" y1="372" x2="943" y2="372" class="lp" marker-end="url(#sp)"/>
+    <!-- アプリ内の処理 -->
+    <rect x="862" y="390" width="166" height="96" rx="6" class="rbox"/>
+    <text x="874" y="412" font-size="11.5" class="b">アプリの中で</text>
+    <text x="874" y="430" font-size="11">写真ごとに現像して</text>
+    <text x="874" y="446" font-size="11">露出を探す(約 5 秒)</text>
+    <text x="874" y="462" font-size="11">サイドカーを書き、</text>
+    <text x="874" y="478" font-size="11">画面を更新・強調</text>
+    <!-- 結果 -->
+    <line x1="945" y1="506" x2="292" y2="506" class="lr ret" marker-end="url(#sr)"/>
+    <text x="560" y="498" font-size="11.5">写真ごとの {変えた値, 変更後の統計, 目標に届いたか, 届かない理由}(約 2KB)</text>
+    <line x1="290" y1="540" x2="498" y2="540" class="la" marker-end="url(#sa)"/>
+    <text x="298" y="534" font-size="11.5">道具の結果</text>
+    <line x1="500" y1="566" x2="292" y2="566" class="la ret" marker-end="url(#sa)"/>
+    <text x="306" y="582" font-size="11.5">文章(報告と質問)</text>
+    <line x1="290" y1="602" x2="82" y2="602" class="lh ret" marker-end="url(#sh)"/>
+    <text x="92" y="596" font-size="11.5">「5 枚は揃えました。</text>
+    <text x="92" y="620" font-size="11.5">DSC03525 は届きません。どうしますか」</text>
+</svg>

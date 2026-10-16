@@ -118,6 +118,7 @@ Claude Code に登録する例(プロジェクトの `.mcp.json`):
 ```
 
 `--log` を付けると、道具の呼び出しごとに時間と AI に渡したデータの量を記録します。
+仕組み(プロセスと通信の向き)は [docs/ai-mcp-architecture.md](docs/ai-mcp-architecture.md) にまとめています。
 
 ## 設定ファイル
 
