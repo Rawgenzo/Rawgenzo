@@ -216,6 +216,22 @@ final class RawgenzoToolsSampleTests: XCTestCase {
             XCTAssertEqual(try XCTUnwrap(row["stats"]?["mean_luminance"]?.doubleValue), mean, accuracy: 0.011)
         }
     }
+
+    /// deltas は今の値に足す。範囲を超えたら端に丸める。changes と一緒なら changes を先に当てる
+    func testDeltas() throws {
+        _ = try json(surface.call("adjust", arguments: ["edits": [["photos": [.string(id)], "changes": ["exposure": 0.4]]],
+                                                        "observe": false], as: ai))
+        let r = try json(surface.call("adjust", arguments: ["edits": [
+            ["photos": [.string(id)], "deltas": ["exposure": 0.3, "saturation": 1.5]],
+            ["photos": [.string(id2)], "changes": ["exposure": 1], "deltas": ["exposure": -0.25]],
+        ], "observe": false], as: ai))
+        let rows = try XCTUnwrap(r["results"]?.arrayValue)
+        XCTAssertEqual(rows[0]["changed"]?["exposure"]?["to"], 0.7)
+        XCTAssertEqual(rows[0]["changed"]?["saturation"]?["to"], 2, "範囲の端(2)に丸める")
+        XCTAssertEqual(rows[1]["changed"]?["exposure"]?["to"], 0.75)
+        XCTAssertTrue(surface.call("adjust", arguments: ["edits": [["photos": [.string(id)]]]], as: ai).isError,
+                      "changes も deltas も無い")
+    }
 }
 
 final class RawgenzoToolsSizeTests: XCTestCase {
@@ -350,6 +366,8 @@ final class RawgenzoAgentHostTests: XCTestCase {
                                  call(3, "undo", [:])], replies: 2)
         XCTAssertEqual(undo[1]["result"]?["isError"], true)
         XCTAssertTrue(undo[1].jsonString().contains("rawgenzo-app"), undo[1].jsonString())
+        XCTAssertTrue(undo[1].jsonString().contains("\(ids[0]) の設定"), "対象は写真の ID で示す")
+        XCTAssertFalse(undo[1].jsonString().contains(folder.path), "パスは見せない")
         XCTAssertEqual(editor.settings.exposure, 1.0, "人の変更は消えない")
     }
 

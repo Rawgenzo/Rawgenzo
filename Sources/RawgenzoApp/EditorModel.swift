@@ -447,7 +447,8 @@ final class EditorModel: ObservableObject {
         highlightToken += 1
         let token = highlightToken
         Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: 4_000_000_000)
+            // 4 秒では「あっと思ったときには消えていた」(オーナー)ので 7 秒
+            try? await Task.sleep(nanoseconds: 7_000_000_000)
             guard let self, self.highlightToken == token else { return }
             self.agentHighlights = []
         }

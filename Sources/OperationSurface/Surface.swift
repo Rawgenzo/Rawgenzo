@@ -279,8 +279,10 @@ public final class Surface {
             for j in (i + 1)..<undoStack.count where !targetSet.contains(j) {
                 let later = undoStack[j]
                 if let shared = undoStack[i].resources.intersection(later.resources).sorted().first {
-                    if later.caller == caller { throw UndoError.laterOwnChange(resource: shared, task: later.task) }
-                    throw UndoError.conflict(resource: shared, laterCaller: later.caller)
+                    // AI に見せるのは対象の識別子(パスなど)ではなく、取り消しの手順に付けた名前
+                    let name = undoStack[i].actions.first { $0.resource == shared }?.label ?? shared
+                    if later.caller == caller { throw UndoError.laterOwnChange(resource: name, task: later.task) }
+                    throw UndoError.conflict(resource: name, laterCaller: later.caller)
                 }
             }
         }
