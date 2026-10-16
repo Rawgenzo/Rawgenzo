@@ -154,7 +154,8 @@ ARW → CameraRegistry が機種判定 → CameraProfile.makeSource → RAWSourc
 ### 操作面(OperationSurface)
 
 プロセスと通信の全体像は `docs/ai-mcp-architecture.md`(実装の説明。図は `docs/images/` の SVG が元で、文書には `rsvg-convert --zoom=2` で作った PNG を貼る。無ければ次善の策として `scripts/svg2png.swift`。Mermaid は図が小さく読みにくかったのでやめた)。検討の経緯は `docs/ai-agent-architecture.md`。
-通信の経路や道具を変えたら、`ai-mcp-architecture.md` も合わせて直す。
+通信の経路や道具を変えたら、`ai-mcp-architecture.md` も合わせて直す。GUI の機能と道具の対応(道具にしていないもの・してはいけないもの、
+道具を足すときに直すところ)は `docs/ai-tool-coverage.md`。道具を足したらこの一覧も直す。
 
 - 汎用部分なので Rawgenzo 固有のこと(写真・現像設定)を持ち込まない。他のソフトでも使える形を保つ
 - `Surface` は 1 スレッド(直列キュー)からだけ使う。道具の処理が RAWSource に触ることがあるため

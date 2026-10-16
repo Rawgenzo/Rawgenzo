@@ -95,6 +95,7 @@ swiftc -O -o /tmp/svg2png scripts/svg2png.swift
 | 場所 | 内容 |
 |---|---|
 | `Sources/OperationSurface/` | 汎用の部分(Rawgenzo に依存しない)。`Surface`、`MCPServer`、`MCPRouter`、`UnixSocket` |
+| `docs/ai-tool-coverage.md` | GUI の機能と道具の対応(まだ道具にしていないもの・道具にしてはいけないもの) |
 | `Sources/RawgenzoSurface/` | Rawgenzo の道具(`RawgenzoTools`。`get_app_state` はアプリで今開いている写真を返す。`set_crop` は切り抜きと傾き補正、`list_looks` / `set_look` はルック、`set_lens_correction`・`set_hdr_output`・`reset_settings` はレンズ補正・HDR 出力・初期値)、作業場所(`RawgenzoWorkspace`。写真の ID は作業フォルダの中ならファイル名、外なら絶対パス)、アプリの受け口(`RawgenzoAgentHost`) |
 | `Sources/rawdev/main.swift` | `rawdev mcp`(振り分けと記録) |
 | `Sources/RawgenzoApp/AgentLink.swift`、`EditorModel.swift` | アプリの編集中の写真への反映、人の変更の記録、画面の知らせと強調 |
