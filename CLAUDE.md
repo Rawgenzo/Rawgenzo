@@ -62,6 +62,10 @@ Sources/RAWCore/            現像エンジン。UI 非依存(SwiftUI を import
   Sidecar/                  SidecarStore(<RAW名>.rawgenzo.json)
   Export/                   Exporter(JPEG / HEIF / 16bit TIFF / HDR HEIF)
   Photo.swift               Photo と RAWEngine(アプリ・CLI の窓口)
+Sources/OperationSurface/   AI などに操作を委ねる汎用の操作面(Foundation だけに依存。RAWCore も import しない)
+  JSONValue / JSONSchema    道具の引数・結果の JSON と、入力の形(AI への説明と検証を兼ねる)
+  Tool                      Effect(影響の段階)、ToolDescriptor、ToolResult、Caller、ToolContext(取り消しの登録)
+  Surface                   道具の登録と呼び出し(検証 → 権限 → 実行 → 監査ログ)、主体ごとの取り消し、汎用の道具(undo 等)
 Sources/RawgenzoApp/        SwiftUI アプリ
   RawgenzoApp.swift         App、メニュー、AppDelegate
   AboutPanel.swift          「Rawgenzo について」(作者・公式ページ・ライセンス)
@@ -77,6 +81,7 @@ Sources/RawgenzoApp/        SwiftUI アプリ
   ThumbnailCache.swift      埋め込みプレビューからのサムネイル
 Sources/rawdev/main.swift   CLI
 Tests/RAWCoreTests/         RAWCore のテスト(1ファイル)
+Tests/OperationSurfaceTests/ OperationSurface のテスト
 scripts/make-app.sh         .app 化・アドホック署名・インストール
 scripts/make_icon.py        アイコン生成(Pillow + numpy)
 Resources/AppIcon.png       アプリアイコン(1024px)
@@ -129,6 +134,15 @@ ARW → CameraRegistry が機種判定 → CameraProfile.makeSource → RAWSourc
 - `swift-tools-version: 5.9` のまま(言語モードは Swift 5 で、厳格な並行性チェックは無効)。要件は Swift 6.4 だが、
   tools-version を 6 以上に上げると言語モードが Swift 6 になり厳格なチェックが有効になるので、上げるのは Swift 6 モードへの
   移行(未着手)と一緒に行う
+
+### 操作面(OperationSurface)
+
+- 汎用部分なので Rawgenzo 固有のこと(写真・現像設定)を持ち込まない。他のソフトでも使える形を保つ
+- `Surface` は 1 スレッド(直列キュー)からだけ使う。道具の処理が RAWSource に触ることがあるため
+- 取り消しは「変える前の値に戻す」方式。`registerUndo` には変えた対象(写真のパスなど)を渡す。
+  後から別の主体が同じ対象を変えていたら取り消しを断る(戻すと他人の変更まで消えるため。最初の版はこれを見落としていた)
+- 失敗は例外ではなく `ToolResult.error` で返す(AI に理由を読ませてやり直させるため)
+- 道具の一覧は登録順で返す(AI 側のプロンプトキャッシュを効かせるため。並びを毎回変えない)
 
 ### はまりどころ(過去に実際に起きたもの・起きかけたもの)
 
