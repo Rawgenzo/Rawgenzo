@@ -302,6 +302,12 @@ final class RawgenzoToolsSampleTests: XCTestCase {
 
         XCTAssertFalse(surface.call("undo", as: ai).isError)
         XCTAssertFalse(FileManager.default.fileExists(atPath: sidecar.path))
+
+        // 下端がちょうど 1 の枠: 小数の誤差で「縮めた」と注記しない(試験で付いた)
+        let edge = try json(surface.call("set_crop", arguments: [
+            "photos": [.string(id)], "x": 0.054, "y": 0.19, "width": 0.728, "height": 0.81,
+        ], as: ai))
+        XCTAssertNil(edge["results"]?.arrayValue?.first?["notes"], "\(edge)")
     }
 
     /// set_crop の比率・傾き・解除と、入力の誤り

@@ -308,7 +308,7 @@ public enum RawgenzoTools {
                                          angle: tilt, aspect: aspect ?? .free)
                         if let a = aspect, let ratio = a.value(imageAspect: imageAspect) {
                             let shrunk = c.shrunk(toAspect: ratio, imageAspect: imageAspect)
-                            if shrunk != c { notes.append("枠の中心を保って \(a.label) に合わせて縮めた") }
+                            if differs(shrunk, c) { notes.append("枠の中心を保って \(a.label) に合わせて縮めた") }
                             c = shrunk
                         }
                     } else if let a = aspect {
@@ -320,7 +320,9 @@ public enum RawgenzoTools {
                     let requested = c
                     c = c.clamped()
                     if !c.isInsideImage(imageAspect: imageAspect) { c = c.fitted(imageAspect: imageAspect) }
-                    if c != requested {
+                    // 等しいかではなく差の大きさで比べる。y 0.19・高さ 0.81 のように下端がちょうど 1 の枠は、
+                    // clamped の 1 - 0.81 = 0.18999999999999995 で値がわずかに変わり、縮めていないのに注記が付いた(試験)
+                    if differs(c, requested) {
                         notes.append("枠が傾けた画像からはみ出すので、はみ出さない大きさに縮めた")
                     }
                     after.crop = c == .full ? nil : c
@@ -337,6 +339,11 @@ public enum RawgenzoTools {
             }
             return .json(["results": .array(results)])
         }
+    }
+
+    /// 枠が目に見えて違うか(小数の誤差は同じとみなす)
+    static func differs(_ a: CropSettings, _ b: CropSettings) -> Bool {
+        [a.x - b.x, a.y - b.y, a.width - b.width, a.height - b.height, a.angle - b.angle].contains { abs($0) > 1e-6 }
     }
 
     static func cropJSON(_ crop: CropSettings?) -> JSONValue {
