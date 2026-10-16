@@ -415,6 +415,14 @@ final class EditorModel: ObservableObject {
         photo?.url.standardizedFileURL.path == url.standardizedFileURL.path
     }
 
+    /// AI に見せる、ユーザが今見ているもの
+    func viewStateForAgent() -> AppViewState {
+        let fits: Bool
+        if case .fit = zoomMode { fits = true } else { fits = false }
+        return AppViewState(folder: folder, openPhoto: photo?.url, zoom: displayZoom > 0 ? displayZoom : nil,
+                            fitsWindow: fits, isCropping: isCropping)
+    }
+
     /// AI が読む設定: 開いている写真なら、まだ保存していない変更を含む編集中の値
     func liveSettingsForAgent(_ url: URL) -> DevelopSettings? {
         isOpen(url) ? settings : nil

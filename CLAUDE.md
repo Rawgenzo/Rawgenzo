@@ -73,7 +73,7 @@ Sources/OperationSurface/   AI などに操作を委ねる汎用の操作面(Fou
   MCPRouter                 MCP のメッセージを、起動中のアプリ(ソケットの先)か自分の操作面かに、メッセージごとに振り分ける
 Sources/RawgenzoSurface/    Rawgenzo の領域定義(RAWCore と OperationSurface を使う)
   RawgenzoWorkspace         作業フォルダと写真(ID = フォルダ内のファイル名。フォルダの外は指せない)
-  RawgenzoTools             道具: list_photos / get_photo / get_stats / get_preview / adjust / solve_exposure
+  RawgenzoTools             道具: get_app_state / list_photos / get_photo / get_stats / get_preview / adjust / solve_exposure
                             (+ undo / recent_operations)
   RawgenzoAgentHost         アプリの中でソケット(~/.Rawgenzo/agent.sock)を受け、作業フォルダごとの操作面につなぐ。
                             RawgenzoBridge(中継との決まり: 最初の通知 rawgenzo/workspace で作業フォルダを知らせる)

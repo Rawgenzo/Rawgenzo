@@ -39,7 +39,7 @@ text{font-family:"Hiragino Sans","Hiragino Kaku Gothic ProN","Yu Gothic","Noto S
     <line x1="290" y1="84" x2="718" y2="84" class="lp" marker-end="url(#sp)"/>
     <text x="300" y="78" font-size="11.5">会話の始まり: initialize / tools/list</text>
     <line x1="720" y1="106" x2="292" y2="106" class="lp ret" marker-end="url(#sp)"/>
-    <text x="300" y="122" class="m" font-size="11.5">AI への説明(操作の決まりを含む)と、道具 8 種の名前・説明・入力の形(約 9,400 字)</text>
+    <text x="300" y="122" class="m" font-size="11.5">AI への説明(操作の決まりを含む)と、道具 9 種の名前・説明・入力の形(約 11,000 字)</text>
 
     <!-- 1 -->
     <line x1="80" y1="158" x2="288" y2="158" class="lh" marker-end="url(#sh)"/>

@@ -118,7 +118,7 @@ text{font-family:"Hiragino Sans","Hiragino Kaku Gothic ProN","Yu Gothic","Noto S
     <rect x="550" y="530" width="120" height="70" rx="6" class="inner"/>
     <text x="562" y="554" class="b" font-size="12.5">道具</text>
     <text x="562" y="574" class="m mono" font-size="10.5">RawgenzoTools</text>
-    <text x="562" y="590" class="m" font-size="11">adjust ほか 8 種</text>
+    <text x="562" y="590" class="m" font-size="11">adjust ほか 9 種</text>
 
     <rect x="686" y="530" width="112" height="70" rx="6" class="inner"/>
     <text x="698" y="554" class="b" font-size="12.5">現像エンジン</text>

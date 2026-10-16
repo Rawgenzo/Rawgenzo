@@ -21,6 +21,26 @@ public protocol LiveEditing: AnyObject {
     func liveSettings(for url: URL) -> DevelopSettings?
     /// その写真をアプリで開いていれば、編集中の設定を差し替えて true。保存はしない(作業場所が保存する)
     func applyLive(_ settings: DevelopSettings, for url: URL, origin: ChangeOrigin?) -> Bool
+    /// ユーザがアプリで今見ているもの(「この写真」と言われたときに AI が引く)
+    func viewState() -> AppViewState
+}
+
+/// アプリの表示の状態
+public struct AppViewState: Sendable {
+    /// アプリで開いているフォルダ(無ければ nil)
+    public var folder: URL?
+    /// 表示している写真(無ければ nil)
+    public var openPhoto: URL?
+    /// 表示倍率(1 = 等倍)。ウインドウに合わせているときは fitsWindow が true
+    public var zoom: Double?
+    public var fitsWindow: Bool
+    /// クロップ枠を調整中か
+    public var isCropping: Bool
+
+    public init(folder: URL?, openPhoto: URL?, zoom: Double?, fitsWindow: Bool, isCropping: Bool) {
+        self.folder = folder; self.openPhoto = openPhoto; self.zoom = zoom
+        self.fitsWindow = fitsWindow; self.isCropping = isCropping
+    }
 }
 
 /// AI に操作させるときの作業場所: 1 つのフォルダと、その中の写真。

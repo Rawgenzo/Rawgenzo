@@ -23,6 +23,11 @@ final class AgentLiveLink: LiveEditing {
         onMain { $0.applyAgentSettings(settings, for: url, origin: origin) } ?? false
     }
 
+    func viewState() -> AppViewState {
+        onMain { $0.viewStateForAgent() }
+            ?? AppViewState(folder: nil, openPhoto: nil, zoom: nil, fitsWindow: true, isCropping: false)
+    }
+
     private func onMain<T>(_ body: @MainActor (EditorModel) -> T?) -> T? {
         if Thread.isMainThread {
             return MainActor.assumeIsolated { model.flatMap { body($0) } }

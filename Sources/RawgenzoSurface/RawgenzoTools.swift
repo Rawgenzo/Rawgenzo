@@ -11,6 +11,7 @@ public enum RawgenzoTools {
         設定は写真ごとのサイドカー(<RAW>.rawgenzo.json)に保存されます。adjust の変更は undo で取り消せます。
 
         進め方の目安:
+        - 「この写真」「今開いている写真」と言われたら、get_app_state でユーザがアプリで見ている写真を確かめる
         - list_photos で写真とメタデータ(ISO・レンズ・撮影日時など)を見る。条件で絞り込める
         - get_photo で今の設定を見る
         - 明るさや色の判断は、まず get_stats(数値。安い)で行う。画像が要るときだけ get_preview を使う(画像はトークンを多く使う)
@@ -62,6 +63,35 @@ public enum RawgenzoTools {
     // MARK: - 道具
 
     static func register(on surface: Surface, workspace ws: RawgenzoWorkspace) {
+        surface.register(ToolDescriptor(
+            name: "get_app_state", title: "アプリの表示",
+            description: "ユーザが Rawgenzo アプリで今見ているもの(開いている写真・表示倍率・クロップ中か)を返す。"
+                + "「この写真」「今開いている写真」と言われたらまず使う。open_photo が写真の ID。"
+                + "app_connected が false なら、アプリが起動していないか、AI からの操作の受け付けがオフで、アプリの状態は分からない",
+            effect: .read)) { _, _ in
+            guard let live = ws.live else {
+                return .json(["app_connected": false,
+                              "note": "Rawgenzo アプリにつながっていない(起動していないか、設定で AI からの操作の受け付けがオフ)。どの写真のことか、ユーザに聞くこと"])
+            }
+            let v = live.viewState()
+            var o: [String: JSONValue] = ["app_connected": true, "cropping": .bool(v.isCropping)]
+            let inWorkspace = v.folder.map { $0.standardizedFileURL.path == ws.folder.path } ?? false
+            o["folder_is_workspace"] = .bool(inWorkspace)
+            if let f = v.folder, !inWorkspace { o["app_folder"] = .string(f.lastPathComponent) }
+            if let p = v.openPhoto {
+                if inWorkspace, let id = try? ws.url(for: p.lastPathComponent).lastPathComponent {
+                    o["open_photo"] = .string(id)
+                } else {
+                    o["open_photo"] = .null
+                    o["open_photo_outside_workspace"] = .string(p.lastPathComponent)
+                    o["note"] = "アプリで開いている写真は、この作業フォルダの外にあるので操作できない"
+                }
+            } else {
+                o["open_photo"] = .null
+            }
+            o["zoom"] = v.fitsWindow ? "ウインドウに合わせる" : v.zoom.map { .string("\(Int(($0 * 100).rounded()))%") } ?? .null
+            return .json(.object(o))
+        }
         surface.register(ToolDescriptor(
             name: "list_photos", title: "写真の一覧",
             description: "作業フォルダの写真と撮影情報を名前順に返す。条件で絞り込める。"

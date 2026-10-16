@@ -21,7 +21,7 @@ final class RawgenzoToolsSchemaTests: XCTestCase {
         let ws = RawgenzoWorkspace(folder: FileManager.default.temporaryDirectory)
         let surface = RawgenzoTools.makeSurface(workspace: ws)
         XCTAssertEqual(surface.descriptors.map(\.name),
-                       ["list_photos", "get_photo", "get_stats", "get_preview", "adjust", "solve_exposure", "undo", "recent_operations"])
+                       ["get_app_state", "list_photos", "get_photo", "get_stats", "get_preview", "adjust", "solve_exposure", "undo", "recent_operations"])
         XCTAssertEqual(surface.descriptors.first { $0.name == "adjust" }?.effect, .modify)
     }
 
@@ -253,6 +253,10 @@ final class RawgenzoAgentHostTests: XCTestCase {
         var settings = DevelopSettings()
         var applied: [(DevelopSettings, ChangeOrigin?)] = []
         func liveSettings(for url: URL) -> DevelopSettings? { url == openURL ? settings : nil }
+        var folderShown: URL?
+        func viewState() -> AppViewState {
+            AppViewState(folder: folderShown, openPhoto: openURL, zoom: 1, fitsWindow: false, isCropping: false)
+        }
         func applyLive(_ s: DevelopSettings, for url: URL, origin: ChangeOrigin?) -> Bool {
             guard url == openURL else { return false }
             settings = s
@@ -334,6 +338,30 @@ final class RawgenzoAgentHostTests: XCTestCase {
         XCTAssertEqual(replies.last?["result"]?["isError"], false, out)
         XCTAssertEqual(editor.settings.vibrance, 0.3, "アプリ(host)の編集中の設定に届いた")
         XCTAssertEqual(editor.applied.last?.1?.caller, .agent("mcp:relay"))
+    }
+
+    /// アプリで開いている写真を ID で返す。作業フォルダの外の写真なら操作できないと知らせる
+    func testAppStateReportsOpenPhoto() throws {
+        editor.folderShown = folder
+        func state() throws -> JSONValue {
+            let r = try exchange([RawgenzoBridge.handshake(folder: folder),
+                                  #"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"clientInfo":{"name":"t"}}}"#,
+                                  call(2, "get_app_state", [:])], replies: 2)
+            let text = try XCTUnwrap(r[1]["result"]?["content"]?.arrayValue?.first?["text"]?.stringValue)
+            return try JSONDecoder().decode(JSONValue.self, from: Data(text.utf8))
+        }
+        var s = try state()
+        XCTAssertEqual(s["app_connected"], true)
+        XCTAssertEqual(s["open_photo"], .string(ids[0]))
+        XCTAssertEqual(s["folder_is_workspace"], true)
+        XCTAssertEqual(s["zoom"], "100%")
+
+        editor.folderShown = URL(fileURLWithPath: "/somewhere/else", isDirectory: true)
+        editor.openURL = URL(fileURLWithPath: "/somewhere/else/DSC00001.ARW")
+        s = try state()
+        XCTAssertEqual(s["open_photo"], .null)
+        XCTAssertEqual(s["open_photo_outside_workspace"], "DSC00001.ARW")
+        XCTAssertEqual(s["app_folder"], "else")
     }
 
     func testRequiresHandshake() throws {
@@ -480,5 +508,17 @@ final class CrossProcessUndoTests: XCTestCase {
         XCTAssertTrue(rawdev.call("undo", as: ai).isError)
         XCTAssertEqual(saved(ids[0])?.exposure, 1, "断られなかった方の写真も変えない")
         XCTAssertEqual(saved(ids[1])?.exposure, 2)
+    }
+}
+
+final class AppStateWithoutAppTests: XCTestCase {
+    /// アプリにつながっていない(rawdev が自分で処理する)ときは、分からないと返す
+    func testWithoutApp() throws {
+        let surface = RawgenzoTools.makeSurface(workspace: RawgenzoWorkspace(folder: FileManager.default.temporaryDirectory))
+        let r = surface.call("get_app_state", as: .agent("t"))
+        XCTAssertFalse(r.isError)
+        guard case .json(let v)? = r.content.first else { return XCTFail("JSON が返らない") }
+        XCTAssertEqual(v["app_connected"], false)
+        XCTAssertNotNil(v["note"])
     }
 }
