@@ -198,6 +198,24 @@ final class RawgenzoToolsSampleTests: XCTestCase {
         XCTAssertEqual(try json(surface.call("list_photos", arguments: ["edited": true], as: ai))["total"], 0)
         XCTAssertTrue(surface.call("solve_exposure", arguments: ["photos": [.string(id)]], as: ai).isError, "目標が無い")
     }
+
+    /// 白飛びの上限だけを渡したときは、今の平均輝度を保つ(試験で AI により明るさが変わったりしたため)
+    func testClippingOnlyKeepsBrightness() throws {
+        let before = try json(surface.call("get_stats", arguments: ["photo": .string(id2)], as: ai))
+        let mean = try XCTUnwrap(before["mean_luminance"]?.doubleValue)
+        let clip = try XCTUnwrap(before["highlight_clipping"]?.doubleValue)
+        let limit = clip / 3
+        let r = try json(surface.call("solve_exposure", arguments: [
+            "photos": [.string(id2)], "max_highlight_clipping": .number(limit),
+        ], as: ai))
+        let row = try XCTUnwrap(r["results"]?.arrayValue?.first)
+        XCTAssertEqual(row["kept_mean_luminance"]?.doubleValue, mean)
+        XCTAssertEqual(row["met"]?["clipping"], true)
+        XCTAssertLessThanOrEqual(try XCTUnwrap(row["stats"]?["highlight_clipping"]?.doubleValue), limit)
+        if row["met"]?["luminance"] == true {
+            XCTAssertEqual(try XCTUnwrap(row["stats"]?["mean_luminance"]?.doubleValue), mean, accuracy: 0.011)
+        }
+    }
 }
 
 final class RawgenzoToolsSizeTests: XCTestCase {
