@@ -59,7 +59,8 @@ Sources/RAWCore/            現像エンジン。UI 非依存(SwiftUI を import
   Model/                    DevelopSettings(現像パラメータ)、ParameterCatalog(数値パラメータの範囲・基準値・説明)、CropFitting(枠を回転後の画像に収める計算)、
                             PreviewZoom(表示倍率の計算)、RAWMetadata、RAWError
   Observe/                  ImageStats(現像結果の数値の観測: 輝度・白飛び・ヒストグラム・8×8 区画)、
-                            DevelopPipeline.processFitting(長辺を指定して縮小現像)、PreviewEncoder(縮小 JPEG)
+                            DevelopPipeline.processFitting(長辺を指定して縮小現像)、PreviewEncoder(縮小 JPEG)、
+                            ExposureSolver(明るさ・白飛びの目標から露出とハイライト回復を二分法で探す)
   Sidecar/                  SidecarStore(<RAW名>.rawgenzo.json)
   Export/                   Exporter(JPEG / HEIF / 16bit TIFF / HDR HEIF)
   Photo.swift               Photo と RAWEngine(アプリ・CLI の窓口)
@@ -70,7 +71,8 @@ Sources/OperationSurface/   AI などに操作を委ねる汎用の操作面(Fou
   MCPServer                 操作面を MCP サーバー(stdio の JSON-RPC。tools だけ)として公開する。Foundation だけで自作
 Sources/RawgenzoSurface/    Rawgenzo の領域定義(RAWCore と OperationSurface を使う)
   RawgenzoWorkspace         作業フォルダと写真(ID = フォルダ内のファイル名。フォルダの外は指せない)
-  RawgenzoTools             道具: list_photos / get_photo / get_stats / get_preview / adjust(+ undo / recent_operations)
+  RawgenzoTools             道具: list_photos / get_photo / get_stats / get_preview / adjust / solve_exposure
+                            (+ undo / recent_operations)
 Sources/RawgenzoApp/        SwiftUI アプリ
   RawgenzoApp.swift         App、メニュー、AppDelegate
   AboutPanel.swift          「Rawgenzo について」(作者・公式ページ・ライセンス)
@@ -154,6 +156,12 @@ ARW → CameraRegistry が機種判定 → CameraProfile.makeSource → RAWSourc
 - 道具の一覧は会話のたびに AI に送られる。同じ長い説明を複数の道具に載せない(項目の説明は adjust にだけ載せている)
 - 試すときは `AItrial/`(サンプルへのシンボリックリンク。サイドカーはこのフォルダに書かれる)と、
   手元の `.mcp.json` を使う。どちらも .gitignore 済み(`.mcp.json` は手元の絶対パスを含むので公開しない)
+- **目標で指示する道具を優先する**。2026-10-16 の試験では、AI が「値を変えて get_stats で見る」を繰り返し
+  (明るさを揃える指示で 17 回)、人のスライダー操作を数値でなぞった。solve_exposure(目標を渡すとアプリが探す)で 1 回になった。
+  探索は長辺 512 で粗く、長辺 1024(get_stats と同じ)で仕上げる。白飛びの割合は解像度で変わるので、512 だけだと
+  AI が get_stats で確かめたとき目標を超えていることがある(実サンプルで 1.25% になった)
+- 1 回の指示は 1 回の呼び出し・1 つの取引にまとめられるようにする(写真ごとに違う変更でも。adjust の edits)。
+  試験では写真ごとに adjust が 4 回呼ばれ、取り消しに undo が 4 回要った
 - Rawgenzo の道具(`RawgenzoTools`)の入力の形・説明は `ParameterCatalog` から作る。道具の結果の JSON のキーは snake_case にそろえる
 - `RawgenzoWorkspace` は写真を開くたびにサイドカーを読み直す(アプリや CLI が書き換えているかもしれないため)。
   ただし**アプリが同じ写真を開いていると、アプリの自動保存が AI の変更を上書きする**(アプリとの橋渡しは未実装)

@@ -21,7 +21,7 @@ final class RawgenzoToolsSchemaTests: XCTestCase {
         let ws = RawgenzoWorkspace(folder: FileManager.default.temporaryDirectory)
         let surface = RawgenzoTools.makeSurface(workspace: ws)
         XCTAssertEqual(surface.descriptors.map(\.name),
-                       ["list_photos", "get_photo", "get_stats", "get_preview", "adjust", "undo", "recent_operations"])
+                       ["list_photos", "get_photo", "get_stats", "get_preview", "adjust", "solve_exposure", "undo", "recent_operations"])
         XCTAssertEqual(surface.descriptors.first { $0.name == "adjust" }?.effect, .modify)
     }
 
@@ -175,6 +175,28 @@ final class RawgenzoToolsSampleTests: XCTestCase {
         XCTAssertFalse(surface.call("undo", as: ai).isError)
         XCTAssertEqual(try json(surface.call("list_photos", arguments: ["edited": true], as: ai))["total"], 0)
         XCTAssertTrue(surface.call("undo", as: ai).isError, "取引は 1 つだけ")
+    }
+
+    /// 目標だけ渡せば、写真ごとに違う露出で合わせ、1 つの取引で保存する
+    func testSolveExposure() throws {
+        let r = try json(surface.call("solve_exposure", arguments: [
+            "photos": [.string(id), .string(id2)], "target_mean_luminance": 0.45, "max_highlight_clipping": 0.01,
+        ], as: ai))
+        let results = try XCTUnwrap(r["results"]?.arrayValue)
+        XCTAssertEqual(results.count, 2)
+        for row in results {
+            XCTAssertEqual(row["met"]?["clipping"], true)
+            XCTAssertLessThanOrEqual(try XCTUnwrap(row["stats"]?["highlight_clipping"]?.doubleValue), 0.01)
+            if row["met"]?["luminance"] == true {
+                XCTAssertEqual(try XCTUnwrap(row["stats"]?["mean_luminance"]?.doubleValue), 0.45, accuracy: 0.011)
+            }
+            // 結果の統計は get_stats と一致する(AI が後から確かめても同じ数字になる)
+            let check = try json(surface.call("get_stats", arguments: ["photo": row["photo"]!], as: ai))
+            XCTAssertEqual(check["mean_luminance"], row["stats"]?["mean_luminance"])
+        }
+        XCTAssertFalse(surface.call("undo", as: ai).isError)
+        XCTAssertEqual(try json(surface.call("list_photos", arguments: ["edited": true], as: ai))["total"], 0)
+        XCTAssertTrue(surface.call("solve_exposure", arguments: ["photos": [.string(id)]], as: ai).isError, "目標が無い")
     }
 }
 

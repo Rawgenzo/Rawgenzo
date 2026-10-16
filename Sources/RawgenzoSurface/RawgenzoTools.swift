@@ -14,7 +14,8 @@ public enum RawgenzoTools {
         - list_photos で写真とメタデータ(ISO・レンズ・撮影日時など)を見る。条件で絞り込める
         - get_photo で今の設定を見る
         - 明るさや色の判断は、まず get_stats(数値。安い)で行う。画像が要るときだけ get_preview を使う(画像はトークンを多く使う)
-        - adjust で変える。同じ変更を複数の写真にまとめて当てられる。結果に変更後の主な統計が付く
+        - 明るさを目標に合わせる・揃える・白飛びを抑えるときは solve_exposure に目標を渡す(値を試し続けない)
+        - それ以外は adjust で変える。写真ごとに違う変更も 1 回の呼び出しにまとめられる。結果に変更後の主な統計が付く
         - 値の範囲・効く条件は adjust の各項目の説明にある。例えばシャープネスは等倍で描くときだけ効き、
           縮小したプレビューや統計には表れない
         統計の値はすべて出力の sRGB(見た目に近い値)で 0〜1。
@@ -24,6 +25,7 @@ public enum RawgenzoTools {
     public static func makeSurface(workspace: RawgenzoWorkspace, version: String = "0.1") -> Surface {
         let surface = Surface(name: "rawgenzo", version: version, instructions: instructions)
         register(on: surface, workspace: workspace)
+        registerSolvers(on: surface, workspace: workspace)
         surface.registerStandardTools()
         return surface
     }
@@ -190,6 +192,60 @@ public enum RawgenzoTools {
             var out: [String: JSONValue] = ["results": .array(results)]
             if !observed.isEmpty { out["stats"] = .object(observed) }
             return .json(.object(out))
+        }
+    }
+
+    // MARK: 目標で指示する
+
+    static func registerSolvers(on surface: Surface, workspace ws: RawgenzoWorkspace) {
+        surface.register(ToolDescriptor(
+            name: "solve_exposure", title: "明るさを目標に合わせる",
+            description: "明るさの目標(平均輝度か中央値)と白飛びの上限を渡すと、Rawgenzo が露出とハイライト回復を探して合わせ、"
+                + "サイドカーに保存する。明るさを合わせる・揃える・白飛びを抑えるときは、get_stats で値を試し続けずにこれを使う。"
+                + "写真ごとに必要な値は Rawgenzo が求めるので、複数の写真を同じ目標に揃えるときも 1 回で済む(undo 1 回で戻せる)。"
+                + "白飛びの上限は明るさの目標より優先する。目標に届かないときは結果の met と notes で知らせる。"
+                + "1 枚あたり数秒かかる。結果の統計は get_stats と同じ解像度(長辺 1024)",
+            input: .object([
+                .init("photos", .array(of: photoID, description: "合わせる写真の ID", minItems: 1, maxItems: 200)),
+                .init("target_mean_luminance", .number("目標の平均輝度(sRGB の 0〜1。普通の明るさは 0.4〜0.5 前後)",
+                                                       minimum: 0.02, maximum: 0.98)),
+                .init("target_median_luminance", .number("目標の輝度の中央値(平均の代わりに使う。空や光源など一部の明るい所に引っぱられにくい)",
+                                                         minimum: 0.02, maximum: 0.98)),
+                .init("max_highlight_clipping", .number("白飛びの割合の上限(0.01 = 1%)", minimum: 0, maximum: 0.5)),
+                .init("allow_highlight_recovery", .boolean("白飛びを抑えるのにハイライト回復を使ってよいか(既定 true。false なら露出だけで合わせる)")),
+            ], required: ["photos"]),
+            effect: .modify)) { args, ctx in
+            let mean = args["target_mean_luminance"]?.doubleValue
+            let median = args["target_median_luminance"]?.doubleValue
+            let maxClip = args["max_highlight_clipping"]?.doubleValue
+            if mean != nil, median != nil { return .error("target_mean_luminance と target_median_luminance はどちらか一方にしてください") }
+            if mean == nil, median == nil, maxClip == nil { return .error("目標(明るさか白飛びの上限)を 1 つ以上指定してください") }
+            let target = ExposureSolver.Target(meanLuminance: mean, medianLuminance: median, maxHighlightClipping: maxClip,
+                                               allowHighlightRecovery: args["allow_highlight_recovery"]?.boolValue ?? true)
+            var ids: [String] = []
+            for id in args["photos"]!.arrayValue!.compactMap(\.stringValue) where !ids.contains(id) { ids.append(id) }
+            for id in ids { _ = try ws.url(for: id) }
+
+            var results: [JSONValue] = []
+            for id in ids {
+                let photo = try ws.photo(id)
+                let before = photo.settings
+                func eval(_ edge: Int) -> (DevelopSettings) throws -> ImageStats {
+                    { try ImageStats.compute(ws.engine.pipeline.processFitting(photo, settings: $0, longEdge: edge)) }
+                }
+                let r = try ExposureSolver.solve(from: before, target: target,
+                                                 coarse: eval(512), fine: eval(ImageStats.defaultLongEdge))
+                if r.settings != before { try commit(ws, ctx, photo, from: before, to: r.settings) }
+                var row: [String: JSONValue] = [
+                    "photo": .string(id),
+                    "changed": .object(difference(before, r.settings, photo: photo)),
+                    "stats": summary(r.stats),
+                    "met": ["luminance": .bool(r.luminanceMet), "clipping": .bool(r.clippingMet)],
+                ]
+                if !r.notes.isEmpty { row["notes"] = .array(r.notes.map { .string($0) }) }
+                results.append(.object(row))
+            }
+            return .json(["results": .array(results)])
         }
     }
 
