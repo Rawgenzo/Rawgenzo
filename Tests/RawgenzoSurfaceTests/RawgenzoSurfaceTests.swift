@@ -21,7 +21,7 @@ final class RawgenzoToolsSchemaTests: XCTestCase {
         let ws = RawgenzoWorkspace(folder: FileManager.default.temporaryDirectory)
         let surface = RawgenzoTools.makeSurface(workspace: ws)
         XCTAssertEqual(surface.descriptors.map(\.name),
-                       ["get_app_state", "list_photos", "get_photo", "get_stats", "get_preview", "adjust", "set_crop", "solve_exposure", "undo", "recent_operations"])
+                       ["get_app_state", "list_photos", "get_photo", "get_stats", "get_preview", "adjust", "set_crop", "list_looks", "set_look", "solve_exposure", "undo", "recent_operations"])
         XCTAssertEqual(surface.descriptors.first { $0.name == "adjust" }?.effect, .modify)
     }
 
@@ -308,6 +308,58 @@ final class RawgenzoToolsSampleTests: XCTestCase {
             "photos": [.string(id)], "x": 0.054, "y": 0.19, "width": 0.728, "height": 0.81,
         ], as: ai))
         XCTAssertNil(edge["results"]?.arrayValue?.first?["notes"], "\(edge)")
+    }
+
+    /// set_look: 当てる → 強さを足す → 外す。undo で戻る。誤りは何も変えずに断る
+    func testSetLook() throws {
+        let looks = try json(surface.call("list_looks", as: ai))["looks"]?.arrayValue ?? []
+        XCTAssertTrue(looks.contains { $0["id"] == "builtin.cinema" && $0["summary"]?.stringValue != nil })
+
+        var r = try json(surface.call("set_look", arguments: ["photos": [.string(id)], "look": "builtin.cinema",
+                                                              "strength": 0.6], as: ai))
+        XCTAssertEqual(r["results"]?.arrayValue?.first?["look"]?["to"]?["name"], "シネマ風")
+        XCTAssertEqual(SidecarStore().load(for: folder.appendingPathComponent(id))?.settings.look,
+                       LookSelection(id: "builtin.cinema", strength: 0.6))
+
+        r = try json(surface.call("set_look", arguments: ["photos": [.string(id)], "strength_delta": -0.2], as: ai))
+        XCTAssertEqual(try XCTUnwrap(r["results"]?.arrayValue?.first?["look"]?["to"]?["strength"]?.doubleValue), 0.4, accuracy: 1e-9)
+        // ルックを替えても強さは保つ
+        _ = try json(surface.call("set_look", arguments: ["photos": [.string(id)], "look": "builtin.film"], as: ai))
+        XCTAssertEqual(try workspace.photo(id).settings.look?.strength ?? 0, 0.4, accuracy: 1e-9)
+
+        _ = try json(surface.call("set_look", arguments: ["photos": [.string(id)], "look": nil], as: ai))
+        XCTAssertNil(try workspace.photo(id).settings.look)
+
+        for bad: JSONValue in [
+            ["photos": [.string(id)]],
+            ["photos": [.string(id)], "look": "builtin.nothing"],
+            ["photos": [.string(id)], "strength": 0.5],                              // ルックが無い写真の強さ
+            ["photos": [.string(id)], "look": nil, "strength": 0.5],
+            ["photos": [.string(id)], "look": "builtin.mono", "strength": 0.5, "strength_delta": 0.1],
+        ] {
+            XCTAssertTrue(surface.call("set_look", arguments: bad, as: ai).isError, "\(bad)")
+        }
+        // 1 枚でも断れば、ほかの写真も変えない
+        _ = try json(surface.call("set_look", arguments: ["photos": [.string(id2)], "look": "builtin.mono"], as: ai))
+        XCTAssertTrue(surface.call("set_look", arguments: ["photos": [.string(id2), .string(id)], "strength": 0.3], as: ai).isError)
+        XCTAssertEqual(try workspace.photo(id2).settings.look?.strength, 1)
+
+        // 取り消し: 外す → 付け直す…と順に戻る(作業名が無いので 1 回ずつ)
+        for _ in 0..<5 { XCTAssertFalse(surface.call("undo", as: ai).isError) }
+        XCTAssertNil(try workspace.photo(id).settings.look)
+        XCTAssertNil(try workspace.photo(id2).settings.look)
+    }
+
+    /// get_preview の look は仮に当てるだけで、保存しない
+    func testTrialLookIsNotSaved() throws {
+        let plain = surface.call("get_preview", arguments: ["photo": .string(id), "long_edge": 256], as: ai)
+        let mono = surface.call("get_preview", arguments: ["photo": .string(id), "long_edge": 256,
+                                                           "look": ["id": "builtin.mono"]], as: ai)
+        XCTAssertFalse(mono.isError, mono.summary)
+        XCTAssertNotEqual(plain.content.first, mono.content.first, "ルックが当たった画像になる")
+        XCTAssertNil(try workspace.photo(id).settings.look)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: sidecar.path))
+        XCTAssertTrue(surface.call("get_preview", arguments: ["photo": .string(id), "look": ["id": "x"]], as: ai).isError)
     }
 
     /// set_crop の比率・傾き・解除と、入力の誤り

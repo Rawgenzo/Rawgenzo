@@ -6,7 +6,13 @@ public protocol Look {
     /// 安定した識別子。サイドカーに保存されるので変更しないこと。
     var id: String { get }
     var displayName: String { get }
+    /// どんな見た目になるかの短い説明(AI がルックを選ぶときに読む)。無ければ nil
+    var summary: String? { get }
     func apply(to image: CIImage) -> CIImage
+}
+
+extension Look {
+    public var summary: String? { nil }
 }
 
 /// 登録済みルックの一覧。

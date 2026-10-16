@@ -73,7 +73,8 @@ Sources/OperationSurface/   AI などに操作を委ねる汎用の操作面(Fou
   MCPRouter                 MCP のメッセージを、起動中のアプリ(ソケットの先)か自分の操作面かに、メッセージごとに振り分ける
 Sources/RawgenzoSurface/    Rawgenzo の領域定義(RAWCore と OperationSurface を使う)
   RawgenzoWorkspace         作業フォルダと写真(ID = 作業フォルダの中ならファイル名、外なら RAW ファイルの絶対パス)
-  RawgenzoTools             道具: get_app_state / list_photos / get_photo / get_stats / get_preview / adjust / set_crop / solve_exposure
+  RawgenzoTools             道具: get_app_state / list_photos / get_photo / get_stats / get_preview / adjust / set_crop /
+                            list_looks / set_look / solve_exposure
                             (+ undo / recent_operations)
   RawgenzoAgentHost         アプリの中でソケット(~/.Rawgenzo/agent.sock)を受け、作業フォルダごとの操作面につなぐ。
                             RawgenzoBridge(中継との決まり: 最初の通知 rawgenzo/workspace で作業フォルダを知らせる)
@@ -197,6 +198,12 @@ ARW → CameraRegistry が機種判定 → CameraProfile.makeSource → RAWSourc
   結果に `open_photo_warning` を付ける(`RawgenzoTools.openPhotoWarning`。複数の写真をまとめて扱う呼び出しには付けない)。
   説明文に「get_app_state で確かめる」と書いてあっても、AI は会話の前のほうで決めた写真を「この写真」と解釈し、
   アプリで切り替えた後の写真ではなく前の写真をシネマ調にした(2026-10-16 の試験)。説明文だけに頼らない
+- **ルック(list_looks / set_look)**: 「シネマ調に」と頼まれた AI は、ルックを選べなかったので色の値を adjust で作った
+  (2026-10-16 の試験)。AI がルックを選べるよう、`Look.summary`(見た目の説明)を持たせた。.cube のルックは説明が無い。
+  get_preview の `look` で保存せずに試せる。強さを替えてもルックは保ち、ルックを替えても強さは保つ(アプリと同じ)
+- **`JSONValue` は nil リテラルで `.null` になる**(`ExpressibleByNilLiteral`)。「指定なし」と「null(無しにする)」を
+  分けるときに `cond ? x : nil` と書くと、指定なしが `.null` になる。`JSONValue?` を明示して `.none` を使う
+  (set_look で、強さだけの指定がルックを外した)
 - 写真が「開いている写真」かはパスの文字列(standardizedFileURL)で比べる。シンボリックリンクの先は見ないので、
   AItrial(リンク)と RAWsample(実体)を別々に開くと別の写真として扱われ、サイドカーも別になる
 - `rawdev mcp` の標準出力は MCP のメッセージ専用。**print を使わない**(説明・ログは標準エラーへ)。
@@ -310,6 +317,6 @@ README.md(利用者向けの説明)も合わせて更新する。
 - `config.json` を外部で編集した場合は手動で「ファイルから読み直す」が必要(ファイル監視なし)
 - アプリ内チャット(AI をアプリに内蔵する。API キーを預かる形)は 2026-10-16 にオーナーが「一旦見送り」と判断。
   検討の内容・認証の流れ・ChatGPT 対応の考え方・再開するときの進め方は `docs/ai-in-app-chat.md`
-- AI から操作できないもの: ルックの選択・書き出し。取り消しの履歴はアプリと rawdev とで別々
+- AI から操作できないもの: 書き出し・レンズ補正・HDR 出力・写真を開く。取り消しの履歴はアプリと rawdev とで別々
 - スライダーを初期値に戻すのは右端の「↶」ボタンだけ。Lightroom のように名前のダブルクリックで戻す操作は無い
   (2026-10-07 にオーナーが「今は見送り」と判断)

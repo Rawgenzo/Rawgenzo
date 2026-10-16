@@ -439,7 +439,8 @@ final class EditorModel: ObservableObject {
         }
         if oldCrop.aspect != newCrop.aspect { changed.insert("crop.aspect") }
         if oldCrop.angle != newCrop.angle { changed.insert("crop.angle") }
-        if settings.look != new.look { changed.insert("look") }
+        if settings.look?.id != new.look?.id { changed.insert("look.style") }
+        if let a = settings.look, let b = new.look, a.id == b.id, a.strength != b.strength { changed.insert("look.strength") }
         if settings.lens != new.lens { changed.insert("lens") }
         if settings.hdr.extendedOutput != new.hdr.extendedOutput { changed.insert("hdr.extendedOutput") }
         photo.settings = new
@@ -482,6 +483,8 @@ final class EditorModel: ObservableObject {
         case "recent_operations": what = "操作の履歴を見ています"
         case "undo": what = "変更を取り消しました"
         case "set_crop": what = "\(task)切り抜きを変更しました"
+        case "list_looks": what = "ルックの一覧を見ています"
+        case "set_look": what = "\(task)ルックを変更しました"
         default: what = "\(task)写真を変更しました"
         }
         agentActivity = AgentActivity(message: "AI(\(who))が\(what)\(r.isError ? "(失敗)" : "")", date: Date())
