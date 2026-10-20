@@ -14,6 +14,7 @@ let usage = """
   rawdev mcp <フォルダ> [--log <ファイル>]
                                    MCP サーバー(stdio)。MCP クライアント(Claude Code など)から起動して、
                                    フォルダの写真の現像設定を AI に操作させる。--log は呼び出しごとの記録(JSON Lines)
+  rawdev tilt <ファイル|フォルダ>...       傾きの推定(線と人物を基準に、直す角度)
   rawdev stats <ファイル|フォルダ>... [--json] [--long-edge <px>] [--preview <フォルダ>]
                                    今の設定(サイドカー)で現像した結果の明るさ・白飛び・色の統計
                                    (--preview は AI に見せるのと同じ縮小 JPEG を書き出す)
@@ -161,6 +162,50 @@ case "params":
             let unit = p.unit.map { " \($0)" } ?? ""
             print("  \(p.id)  \(p.label)  \(p.range.lowerBound)...\(p.range.upperBound)\(unit)  基準: \(baseline)")
             print("    \(p.summary)")
+        }
+    }
+
+case "tilt":
+    // --preview <フォルダ>: 候補の線に番号を描いた JPEG を書き出す(AI に見せる画像と同じもの)
+    var tiltPreview: URL?
+    var tiltPaths: [String] = []
+    var ti = 0
+    while ti < arguments.count {
+        if arguments[ti] == "--preview", ti + 1 < arguments.count {
+            tiltPreview = URL(fileURLWithPath: (arguments[ti + 1] as NSString).expandingTildeInPath); ti += 2; continue
+        }
+        tiltPaths.append(arguments[ti]); ti += 1
+    }
+    let urls = expand(tiltPaths)
+    if urls.isEmpty { fail("RAWファイルが見つかりません") }
+    for url in urls {
+        do {
+            let start = Date()
+            let photo = try engine.open(url)
+            let r = try TiltEstimator.estimate(photo, settings: photo.settings, pipeline: engine.pipeline)
+            let ms = Int(Date().timeIntervalSince(start) * 1000)
+            print("■ \(url.lastPathComponent)  (\(ms)ms。角度は set_crop の angle に入れると、その線が水平・垂直になる値)")
+            if r.segments.isEmpty { print("  直線: 見つからない") }
+            for g in r.segments {
+                print(String(format: "  %2d %@ %+.2f°  長さ %.2f  (%.2f, %.2f)→(%.2f, %.2f)", g.id, g.axis == .horizontal ? "水平" : "垂直",
+                             g.angle, g.length, g.from.x, g.from.y, g.to.x, g.to.y))
+            }
+            if let dir = tiltPreview {
+                let image = try engine.pipeline.processFitting(photo, settings: TiltEstimator.measuringSettings(photo.settings), longEdge: 1024)
+                let out = try PreviewOverlay.draw(on: image, frame: nil, marks: TiltEstimator.marks(r))
+                let file = dir.appendingPathComponent(url.deletingPathExtension().lastPathComponent + "_tilt.jpg")
+                try PreviewEncoder.jpeg(out).write(to: file)
+            }
+            if let fan = TiltEstimator.verticalFan(r.segments) {
+                print(String(format: "  縦の線が開いている: 左端 %+.2f°  中央 %+.2f°  右端 %+.2f°(%d 本)",
+                             fan.angleAtLeft, fan.angleAtCenter, fan.angleAtRight, fan.count))
+            }
+            if r.subjects.isEmpty { print("  人物: 見つからない") }
+            for m in r.subjects {
+                print(String(format: "  人物(%@): %+.2f°  位置 (%.2f, %.2f)  確からしさ %.2f", ["eyes": "目", "shoulders": "肩", "torso": "体の軸"][m.kind.rawValue]!, m.angle, m.center.x, m.center.y, m.confidence))
+            }
+        } catch {
+            FileHandle.standardError.write("\(url.lastPathComponent): \(error)\n".data(using: .utf8)!)
         }
     }
 

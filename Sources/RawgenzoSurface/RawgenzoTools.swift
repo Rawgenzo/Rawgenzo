@@ -21,6 +21,8 @@ public enum RawgenzoTools {
         - 明るさを目標に合わせる・揃える・白飛びを抑えるときは solve_exposure に目標を渡す(値を試し続けない)
         - それ以外は adjust で変える。写真ごとに違う変更も 1 回の呼び出しにまとめられる。結果に変更後の主な統計が付く
         - 切り抜き・傾き補正は set_crop。枠を決めるときは get_preview に ignore_crop を付けて、切り抜く前の全体を見る
+        - 水平を直すときは、目測より estimate_tilt を使う。水平の基準(建物の線か人物か)を頼まれていなければ、
+          どちらを基準にしたかを伝え、食い違いが大きければ人に聞く
         - 「シネマ調」「フィルムっぽく」「モノクロに」のような雰囲気の指示は、まず list_looks でルック(色の作りのひな形)を確かめ、
           合うものがあれば set_look で当てる。足りない分だけ adjust で整える。get_preview の look で、保存せずに試せる
         - レンズ補正は set_lens_correction、HDR ディスプレイ向けの出力は set_hdr_output、全部を初期値に戻すのは reset_settings
@@ -163,13 +165,25 @@ public enum RawgenzoTools {
                 + "画像はトークンを多く使うので、数値(get_stats)で判断できないときだけ使う。"
                 + "縮小して描くのでシャープネスの効果は見えない。"
                 + "ignore_crop を true にすると切り抜く前の全体を返す(傾き補正は当てたまま)。"
-                + "その画像のピクセル座標を幅・高さで割った値が、set_crop の座標になる",
+                + "その画像のピクセル座標を幅・高さで割った値が、set_crop の座標になる。"
+                + "region を渡すと、その範囲だけを高い解像度で返す(縁の傾き・ピントの確認に。全体を大きく出すよりトークンが少ない)。"
+                + "show_crop_frame は切り抜く前の全体に今の枠を描き(枠の外は暗く)、guide は構図ガイドを枠の中(枠を描かないときは画像全体)に描く。"
+                + "結果の文字に、等倍に対する倍率が付く",
             input: .object([
                 .init("photo", photoID),
                 .init("long_edge", .integer("長辺のピクセル数(既定 768)", minimum: 128, maximum: 1600)),
                 .init("changes", changesSchema(detailed: false)),
                 .init("ignore_crop", .boolean("切り抜く前の全体を返すか(既定 false)")),
                 .init("look", lookTrialSchema),
+                .init("region", .object([
+                    .init("x", .number(minimum: 0, maximum: 1)), .init("y", .number(minimum: 0, maximum: 1)),
+                    // 切り抜きの処理が枠を 5% 以上に広げるので、それより小さい範囲は受け付けない(黙って広がると倍率を誤る)
+                    .init("width", .number(minimum: 0.05, maximum: 1)), .init("height", .number(minimum: 0.05, maximum: 1)),
+                ], required: ["x", "y", "width", "height"],
+                   description: "返す範囲。set_crop と同じ座標(傾き補正の後・切り抜く前の画像に対する比率、左上が原点)。幅・高さは 0.05 以上。等倍より大きくはしない")),
+                .init("show_crop_frame", .boolean("切り抜く前の全体に今の切り抜き枠を描くか(既定 false。true なら ignore_crop も true として扱う)")),
+                .init("guide", .string("重ねる構図ガイド: " + CompositionGuides.all.map { "\($0.id)(\($0.displayName))" }.joined(separator: "・"),
+                                       oneOf: CompositionGuides.all.map(\.id))),
             ], required: ["photo"]),
             effect: .read)) { args, _ in
             let photo = try ws.photo(args["photo"]!.stringValue!)
@@ -178,17 +192,46 @@ public enum RawgenzoTools {
             if let look = args["look"] {
                 if let error = applyTrialLook(look, to: &settings, ws: ws) { return .error(error) }
             }
-            if args["ignore_crop"]?.boolValue == true {
+            let region = args["region"]
+            let showFrame = args["show_crop_frame"]?.boolValue == true
+            let guide = args["guide"]?.stringValue.flatMap(CompositionGuides.guide(id:))
+            if region != nil, showFrame || guide != nil {
+                return .error("region は show_crop_frame・guide と一緒には使えません")
+            }
+            let frame = settings.crop
+            var notes: [String] = []
+            if let r = region {
+                let rect = CropSettings(x: r["x"]!.doubleValue!, y: r["y"]!.doubleValue!,
+                                        width: r["width"]!.doubleValue!, height: r["height"]!.doubleValue!,
+                                        angle: settings.crop?.angle ?? 0)
+                guard rect.x + rect.width <= 1 + 1e-9, rect.y + rect.height <= 1 + 1e-9 else {
+                    return .error("region が画像の外に出ています(x + width と y + height は 1 以下)")
+                }
+                // 範囲を切り抜き枠として現像すると、processFitting がその範囲の大きさで解像度を決める
+                settings.crop = rect
+            } else if showFrame || args["ignore_crop"]?.boolValue == true {
                 // 枠の座標は傾けた後の画像に対するものなので、傾きは残して枠だけ全体にする
                 settings.crop = settings.crop.flatMap { $0.angle == 0 ? nil : CropSettings(angle: $0.angle) }
+                if showFrame, frame == nil || frame.map({ $0.width >= 1 && $0.height >= 1 }) == true {
+                    notes.append("切り抜き枠が無い(全体)ので、枠は描いていない")
+                }
             }
-            let image = try ws.engine.pipeline.processFitting(photo, settings: settings,
+            var image = try ws.engine.pipeline.processFitting(photo, settings: settings,
                                                               longEdge: args["long_edge"]?.intValue ?? 768)
+            let size = photo.source.nativeSize
+            let shown = settings.crop ?? .full
+            let scale = Double(image.extent.width) / (Double(size.width) * shown.width)
+            if showFrame || guide != nil {
+                let f = showFrame ? frame.map { CGRect(x: $0.x, y: $0.y, width: $0.width, height: $0.height) } : nil
+                image = try PreviewOverlay.draw(on: image, frame: f, guides: guide.map { [$0] } ?? [])
+            }
             let jpeg = try PreviewEncoder.jpeg(image, quality: 0.75)
             var content: [ToolContent] = [
                 .image(data: jpeg, mimeType: "image/jpeg"),
                 .text("\(Int(image.extent.width))×\(Int(image.extent.height))"),
+                .text(String(format: "等倍の %.2f 倍", scale)),
             ]
+            if !notes.isEmpty { content.append(.text(notes.joined(separator: "。"))) }
             if let w = openPhotoWarning(ws, [photo.url]) { content.append(.text("open_photo_warning: \(w)")) }
             return ToolResult(content)
         }
@@ -252,6 +295,7 @@ public enum RawgenzoTools {
         }
 
         registerCrop(on: surface, workspace: ws)
+        registerTilt(on: surface, workspace: ws)
         registerLook(on: surface, workspace: ws)
         registerOptions(on: surface, workspace: ws)
     }
@@ -495,6 +539,8 @@ public enum RawgenzoTools {
                 + "get_preview に ignore_crop: true を付けた画像のピクセル座標を、その幅・高さで割った値になる。"
                 + "aspect だけを渡すとその比率で中央に最大の枠、枠と aspect の両方なら枠の中心を保って比率に合わせて縮める。"
                 + "angle だけを渡すと今の枠のまま傾ける。枠が傾けた画像からはみ出すときは、はみ出さない大きさに縮める(結果の notes)。"
+                + "maximize: true で、今の比率のまま傾けた画像に収まる最大の大きさに広げる(アプリの「収まる最大まで広げる」と同じ。"
+                + "位置はなるべく動かさない)。傾きを小さくしたとき、前に縮めた枠を戻すのに使う。angle や aspect と一緒に使える。"
                 + "reset: true で切り抜きも傾きも無しに戻す。複数の写真に同じ指定を当てられる",
             input: .object([
                 .init("photos", .array(of: photoID, description: "切り抜く写真の ID", minItems: 1, maxItems: 1000)),
@@ -504,6 +550,7 @@ public enum RawgenzoTools {
                                        minimum: CropSettings.angleRange.lowerBound, maximum: CropSettings.angleRange.upperBound)),
                 .init("aspect", .string("縦横比。free(自由)・original(元の比率)・square(1:1)・r3x2・r4x3・r16x9・r2x3(縦)・r4x5(縦)",
                                         oneOf: aspectNames)),
+                .init("maximize", .boolean("true で、比率を保って収まる最大の大きさに広げる(x・y・width・height と一緒には使えない)")),
                 .init("reset", .boolean("true で切り抜きと傾き補正を無くす(ほかの項目と一緒には使えない)")),
             ], required: ["photos"]),
             effect: .modify)) { args, ctx in
@@ -512,12 +559,16 @@ public enum RawgenzoTools {
             let reset = args["reset"]?.boolValue == true
             let angle = args["angle"]?.doubleValue
             let aspect = args["aspect"]?.stringValue.flatMap(AspectRatio.init(rawValue:))
-            if reset, !given.isEmpty || angle != nil || aspect != nil {
+            let maximize = args["maximize"]?.boolValue == true
+            if reset, !given.isEmpty || angle != nil || aspect != nil || maximize {
                 return .error("reset はほかの項目と一緒には使えません")
             }
+            if maximize, !given.isEmpty {
+                return .error("maximize は枠(x・y・width・height)と一緒には使えません(枠を指定するか、今の枠を広げるかのどちらか)")
+            }
             if !given.isEmpty, given.count < 4 { return .error("x・y・width・height は 4 つそろえて渡してください") }
-            if !reset, given.isEmpty, angle == nil, aspect == nil {
-                return .error("枠(x・y・width・height)・aspect・angle・reset のどれかを指定してください")
+            if !reset, given.isEmpty, angle == nil, aspect == nil, !maximize {
+                return .error("枠(x・y・width・height)・aspect・angle・maximize・reset のどれかを指定してください")
             }
             if given.count == 4, args["x"]!.doubleValue! + args["width"]!.doubleValue! > 1 + 1e-9
                 || args["y"]!.doubleValue! + args["height"]!.doubleValue! > 1 + 1e-9 {
@@ -561,7 +612,13 @@ public enum RawgenzoTools {
                     if !c.isInsideImage(imageAspect: imageAspect) { c = c.fitted(imageAspect: imageAspect) }
                     // 等しいかではなく差の大きさで比べる。y 0.19・高さ 0.81 のように下端がちょうど 1 の枠は、
                     // clamped の 1 - 0.81 = 0.18999999999999995 で値がわずかに変わり、縮めていないのに注記が付いた(試験)
-                    if differs(c, requested) {
+                    if maximize {
+                        // アプリの「収まる最大まで広げる」と同じ計算。傾きを小さくしても枠は自動では広がらないので、
+                        // AI が +2.5° → +2.05° と戻したとき、縮んだ枠のまま残った(2026-10-20 の試験。AI はアプリのボタンを案内した)
+                        let widened = c.maximized(imageAspect: imageAspect)
+                        if differs(widened, c) { notes.append("収まる最大の大きさにした") }
+                        c = widened
+                    } else if differs(c, requested) {
                         notes.append("枠が傾けた画像からはみ出すので、はみ出さない大きさに縮めた")
                     }
                     after.crop = c == .full ? nil : c
@@ -583,6 +640,91 @@ public enum RawgenzoTools {
     /// 枠が目に見えて違うか(小数の誤差は同じとみなす)
     static func differs(_ a: CropSettings, _ b: CropSettings) -> Bool {
         [a.x - b.x, a.y - b.y, a.width - b.width, a.height - b.height, a.angle - b.angle].contains { abs($0) > 1e-6 }
+    }
+
+    // MARK: 傾きの推定
+
+    static func registerTilt(on surface: Surface, workspace ws: RawgenzoWorkspace) {
+        surface.register(ToolDescriptor(
+            name: "estimate_tilt", title: "傾きの手がかり",
+            description: "写真の傾きを直すための手がかりを返す。長い直線(水平・垂直から 10° 以内)に番号を付けた画像と、"
+                + "各線の角度、人物の目(E1…)・肩(S1…)を結ぶ線と、首と腰を結ぶ体の軸(T1…。垂直の手がかり)の角度。"
+                + "角度はどれも set_crop の angle に入れるとその線が水平(垂直)になる値で、傾き補正の前からの値(今の angle に足すのではない)。"
+                + "画像を見て、本当に水平・垂直なもの(建物や家具の縁・柱・水平線)の番号を segments に渡すと、長さで重みを付けた角度を返す。"
+                + "奥へ伸びる線(遠近で斜めに見える)・ブラインドや斜めに置かれた物は使わない。"
+                + "縦の線が左右で開いているとき(カメラを上下に向けて撮った)は vertical_fan の angle_at_center を使うか、中央に近い縦の線を選ぶ。"
+                + "人物写真では人物の線(subjects)も手がかりになる。目・肩は首をかしげたり肩を傾けたりすると大きく出るので、"
+                + "「身体の傾き」には体の軸(T)を使い、1 本では決めない。体の軸はその人の姿勢(寄りかかる・前かがみ)も含む。"
+                + "confidence が 0.3 未満の線(座っていて腰が隠れているときの体の軸など)は当てにしない。"
+                + "線と人物で食い違うとき、どれを基準にするか決められないときは人に聞く。"
+                + "そのとき、両方の値だけでなく間の角度(人物を立てつつ背景の傾きを抑える)も選択肢に入れる。2 秒ほどかかる",
+            input: .object([
+                .init("photo", photoID),
+                .init("segments", .array(of: .integer(minimum: 1), description: "水平・垂直の基準にする直線の番号(前の結果の画像の番号)")),
+                .init("subjects", .array(of: .string(), description: "基準にする人物の線(E1・S2・T1 など)")),
+                .init("image", .boolean("番号を描いた画像を返すか(既定 true。番号が分かっていて角度だけ欲しいときは false)")),
+                .init("long_edge", .integer("画像の長辺(既定 768)", minimum: 384, maximum: 1600)),
+            ], required: ["photo"]),
+            effect: .read)) { args, _ in
+            let photo = try ws.photo(args["photo"]!.stringValue!)
+            let report = try TiltEstimator.estimate(photo, settings: photo.settings, pipeline: ws.engine.pipeline)
+            let subjects = TiltEstimator.subjectIDs(report.subjects)
+            func point(_ p: CGPoint) -> JSONValue { [.number(round4(Double(p.x))), .number(round4(Double(p.y)))] }
+            func deg(_ v: Double) -> JSONValue { .number((v * 100).rounded() / 100) }
+            var o: [String: JSONValue] = [
+                "photo": .string(ws.id(for: photo.url)),
+                "current_angle": deg(photo.settings.crop?.angle ?? 0),
+                "segments": .array(report.segments.map {
+                    ["id": .number(Double($0.id)), "axis": .string($0.axis.rawValue), "angle": deg($0.angle),
+                     "length": .number(round4($0.length)), "from": point($0.from), "to": point($0.to)]
+                }),
+                "subjects": .array(subjects.map { id, m in
+                    ["id": .string(id), "kind": .string(m.kind.rawValue), "angle": deg(m.angle), "center": point(m.center),
+                     "confidence": .number((m.confidence * 100).rounded() / 100)]
+                }),
+            ]
+            var notes: [String] = []
+            var chosen: [String: JSONValue] = [:]
+            if let ids = args["segments"]?.arrayValue?.compactMap(\.intValue), !ids.isEmpty {
+                let picked = report.segments.filter { ids.contains($0.id) }
+                let missing = ids.filter { id in !picked.contains { $0.id == id } }
+                if !missing.isEmpty { notes.append("見つからない番号: \(missing.map(String.init).joined(separator: ", "))(番号は呼ぶたびに同じ。前の結果の番号を使う)") }
+                if let c = TiltEstimator.combinedAngle(picked) {
+                    chosen["segments"] = ["angle": deg(c.angle), "spread": deg(c.spread), "count": .number(Double(picked.count))]
+                    if c.spread > 0.7 { notes.append("選んだ線の角度が ±\(String(format: "%.1f", c.spread))° ばらついている。遠近で斜めに見える線が混ざっていないか確かめる") }
+                }
+            }
+            if let ids = args["subjects"]?.arrayValue?.compactMap(\.stringValue), !ids.isEmpty {
+                let picked = subjects.filter { ids.contains($0.0) }.map(\.1)
+                if picked.count < ids.count { notes.append("見つからない人物の線がある") }
+                if !picked.isEmpty {
+                    let mean = picked.map(\.angle).reduce(0, +) / Double(picked.count)
+                    let spread = (picked.map { ($0.angle - mean) * ($0.angle - mean) }.reduce(0, +) / Double(picked.count)).squareRoot()
+                    chosen["subjects"] = ["angle": deg(mean), "spread": deg(spread), "count": .number(Double(picked.count))]
+                }
+            }
+            if !chosen.isEmpty { o["chosen"] = .object(chosen) }
+            if report.segments.isEmpty { notes.append("長い直線が見つからない(自然の風景など)。人物の線か、目で見て決める") }
+            if let fan = TiltEstimator.verticalFan(report.segments) {
+                o["vertical_fan"] = ["angle_at_center": deg(fan.angleAtCenter), "angle_at_left": deg(fan.angleAtLeft),
+                                     "angle_at_right": deg(fan.angleAtRight), "count": .number(Double(fan.count))]
+                notes.append(String(format: "縦の線が左右で開いている(左端 %+.1f°、右端 %+.1f°)。カメラを上か下に向けて撮っている。"
+                    + "傾きは画像の中央での値 %+.1f°(端の縦の線を選ぶとずれる)", fan.angleAtLeft, fan.angleAtRight, fan.angleAtCenter))
+            }
+            if photo.lensCorrection != nil, photo.effectiveLensSettings(photo.settings)?.distortion == false {
+                notes.append("歪曲補正が切れているので、画面の端の直線は曲がって測りにくい(set_lens_correction で distortion をオンにすると正確になる)")
+            }
+            if !notes.isEmpty { o["notes"] = .array(notes.map { .string($0) }) }
+
+            var content: [ToolContent] = [.json(.object(o))]
+            if args["image"]?.boolValue ?? true {
+                let image = try ws.engine.pipeline.processFitting(photo, settings: TiltEstimator.measuringSettings(photo.settings),
+                                                                  longEdge: args["long_edge"]?.intValue ?? 768)
+                let marked = try PreviewOverlay.draw(on: image, frame: nil, marks: TiltEstimator.marks(report))
+                content.append(.image(data: try PreviewEncoder.jpeg(marked, quality: 0.75), mimeType: "image/jpeg"))
+            }
+            return warned(ToolResult(content), ws, [photo.url])
+        }
     }
 
     static func cropJSON(_ crop: CropSettings?) -> JSONValue {
