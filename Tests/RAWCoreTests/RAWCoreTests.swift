@@ -1506,6 +1506,21 @@ final class TiltEstimatorTests: XCTestCase {
         XCTAssertNil(TiltEstimator.combinedAngle([]))
     }
 
+    /// 体の軸: 首が腰の右上にある(上が右に倒れた)人は、反時計回り(負の角度)に回すと立つ
+    func testTorsoSign() {
+        let size = CGSize(width: 1000, height: 800)
+        let m = TiltEstimator.torso(top: CGPoint(x: 510, y: 600), bottom: CGPoint(x: 500, y: 400), size)!
+        XCTAssertEqual(m.kind, .torso)
+        XCTAssertEqual(m.angle, -atan2(10, 200) * 180 / .pi, accuracy: 1e-9)
+        XCTAssertNil(TiltEstimator.torso(top: CGPoint(x: 500, y: 300), bottom: CGPoint(x: 500, y: 400), size), "首が腰より下")
+        XCTAssertNil(TiltEstimator.torso(top: CGPoint(x: 700, y: 450), bottom: CGPoint(x: 500, y: 400), size), "寝ている")
+        // 回すと本当に立つか: 体の軸を角度ぶん回した点で確かめる(CropSettings.angle は正 = 時計回り)
+        let t = m.angle * .pi / 180   // 時計回りに t 回す = 上向き y の座標で −t 回す
+        let (dx, dy) = (10.0, 200.0)
+        let rx = dx * cos(-t) - dy * sin(-t)
+        XCTAssertEqual(rx, 0, accuracy: 1e-9, "回した後の体の軸が垂直")
+    }
+
     /// 人物の線: Vision の座標(左下原点)で右上がりの線は、時計回りに回すと水平になる(正の角度)
     func testSubjectMarkSign() {
         let size = CGSize(width: 1000, height: 800)

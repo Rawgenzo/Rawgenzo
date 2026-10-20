@@ -635,16 +635,19 @@ public enum RawgenzoTools {
         surface.register(ToolDescriptor(
             name: "estimate_tilt", title: "傾きの手がかり",
             description: "写真の傾きを直すための手がかりを返す。長い直線(水平・垂直から 10° 以内)に番号を付けた画像と、"
-                + "各線の角度、人物の目(E1…)・肩(S1…)を結ぶ線の角度。"
+                + "各線の角度、人物の目(E1…)・肩(S1…)を結ぶ線と、首と腰を結ぶ体の軸(T1…。垂直の手がかり)の角度。"
                 + "角度はどれも set_crop の angle に入れるとその線が水平(垂直)になる値で、傾き補正の前からの値(今の angle に足すのではない)。"
                 + "画像を見て、本当に水平・垂直なもの(建物や家具の縁・柱・水平線)の番号を segments に渡すと、長さで重みを付けた角度を返す。"
                 + "奥へ伸びる線(遠近で斜めに見える)・ブラインドや斜めに置かれた物・カメラを上下に向けて撮ったときの縦の線は使わない。"
-                + "人物写真では目・肩の線(subjects)も手がかりになるが、首をかしげる人もいるので 1 本では決めない。"
-                + "線と人物で食い違うとき、どれを基準にするか決められないときは人に聞く。2 秒ほどかかる",
+                + "人物写真では人物の線(subjects)も手がかりになる。目・肩は首をかしげたり肩を傾けたりすると大きく出るので、"
+                + "「身体の傾き」には体の軸(T)を使い、1 本では決めない。体の軸はその人の姿勢(寄りかかる・前かがみ)も含む。"
+                + "confidence が 0.3 未満の線(座っていて腰が隠れているときの体の軸など)は当てにしない。"
+                + "線と人物で食い違うとき、どれを基準にするか決められないときは人に聞く。"
+                + "そのとき、両方の値だけでなく間の角度(人物を立てつつ背景の傾きを抑える)も選択肢に入れる。2 秒ほどかかる",
             input: .object([
                 .init("photo", photoID),
                 .init("segments", .array(of: .integer(minimum: 1), description: "水平・垂直の基準にする直線の番号(前の結果の画像の番号)")),
-                .init("subjects", .array(of: .string(), description: "基準にする人物の線(E1・S2 など)")),
+                .init("subjects", .array(of: .string(), description: "基準にする人物の線(E1・S2・T1 など)")),
                 .init("image", .boolean("番号を描いた画像を返すか(既定 true。番号が分かっていて角度だけ欲しいときは false)")),
                 .init("long_edge", .integer("画像の長辺(既定 768)", minimum: 384, maximum: 1600)),
             ], required: ["photo"]),
@@ -662,7 +665,8 @@ public enum RawgenzoTools {
                      "length": .number(round4($0.length)), "from": point($0.from), "to": point($0.to)]
                 }),
                 "subjects": .array(subjects.map { id, m in
-                    ["id": .string(id), "kind": .string(m.kind.rawValue), "angle": deg(m.angle), "center": point(m.center)]
+                    ["id": .string(id), "kind": .string(m.kind.rawValue), "angle": deg(m.angle), "center": point(m.center),
+                     "confidence": .number((m.confidence * 100).rounded() / 100)]
                 }),
             ]
             var notes: [String] = []

@@ -29,15 +29,17 @@ public enum TiltEstimator {
         public var to: CGPoint
     }
 
-    /// 人物の目を結ぶ線・肩を結ぶ線の 1 本
+    /// 人物の目を結ぶ線・肩を結ぶ線(水平の手がかり)、首と腰を結ぶ体の軸(垂直の手がかり)の 1 本
     public struct SubjectMark: Equatable, Sendable {
-        public enum Kind: String, Sendable { case eyes, shoulders }
+        public enum Kind: String, Sendable { case eyes, shoulders, torso }
         public var kind: Kind
-        /// その線が水平になる傾き補正の角度
+        /// その線が水平(体の軸は垂直)になる傾き補正の角度
         public var angle: Double
         /// 線の端(画像に対する比率、左上原点)
         public var from: CGPoint
         public var to: CGPoint
+        /// Vision の確からしさ(0...1。両端の低い方。目は顔の検出の確からしさ)
+        public var confidence: Double = 1
         public var center: CGPoint { CGPoint(x: (from.x + to.x) / 2, y: (from.y + to.y) / 2) }
     }
 
@@ -278,7 +280,9 @@ public enum TiltEstimator {
 
     // MARK: - 人物
 
-    /// 目(瞳)を結ぶ線と、肩を結ぶ線を Vision で見つける。人がいなければ空
+    /// 目(瞳)を結ぶ線・肩を結ぶ線・体の軸(首と腰)を Vision で見つける。人がいなければ空。
+    /// 体の軸は「身体の傾き方向」の手がかり。目や肩の線は首をかしげたり肩を傾けたりすると大きく出る
+    /// (2026-10-20、左の人の目と肩で +2.9°。オーナーは人物だけなら +3° 前後が最適、背景との兼ね合いで変わると判断)
     public static func subjects(in image: CIImage, context: CIContext = CIContext()) throws -> [SubjectMark] {
         let e = image.extent.integral
         guard let cg = context.createCGImage(image, from: e) else { return [] }
@@ -297,7 +301,8 @@ public enum TiltEstimator {
             }
             // 瞳が取れなければ目の輪郭の中心
             if let a = center(lm.leftPupil) ?? center(lm.leftEye), let b = center(lm.rightPupil) ?? center(lm.rightEye),
-               let m = mark(.eyes, a, b, size) {
+               var m = mark(.eyes, a, b, size) {
+                m.confidence = Double(face.confidence)
                 marks.append(m)
             }
         }
@@ -306,10 +311,43 @@ public enum TiltEstimator {
                   l.confidence > 0.3, r.confidence > 0.3 else { continue }
             let a = CGPoint(x: l.location.x * size.width, y: l.location.y * size.height)
             let b = CGPoint(x: r.location.x * size.width, y: r.location.y * size.height)
-            if let m = mark(.shoulders, a, b, size) { marks.append(m) }
+            if var m = mark(.shoulders, a, b, size) {
+                m.confidence = Double(min(l.confidence, r.confidence))
+                marks.append(m)
+            }
+        }
+        for body in bodies.results ?? [] {
+            guard let neck = try? body.recognizedPoint(.neck), neck.confidence > 0.3 else { continue }
+            // 腰は座っていたり写真の下で切れていたりして、確からしさが低く出やすい(DSC03112 で 0.16。片方の人は 0)。
+            // 腰の中心(root)か、両方の股関節の中点の、確からしい方を使う。0.1 未満なら体の軸は出さない
+            var bottom: (point: CGPoint, confidence: Float)?
+            if let r = try? body.recognizedPoint(.root), r.confidence >= 0.1 { bottom = (r.location, r.confidence) }
+            if let l = try? body.recognizedPoint(.leftHip), let r = try? body.recognizedPoint(.rightHip) {
+                let c = min(l.confidence, r.confidence)
+                if c >= 0.1, c > (bottom?.confidence ?? 0) {
+                    bottom = (CGPoint(x: (l.location.x + r.location.x) / 2, y: (l.location.y + r.location.y) / 2), c)
+                }
+            }
+            guard let b = bottom else { continue }
+            let top = CGPoint(x: neck.location.x * size.width, y: neck.location.y * size.height)
+            if var m = torso(top: top, bottom: CGPoint(x: b.point.x * size.width, y: b.point.y * size.height), size) {
+                m.confidence = Double(min(neck.confidence, b.confidence))
+                marks.append(m)
+            }
         }
         // 左から順に並べる(呼ぶたびに番号が変わらないように)
         return marks.sorted { ($0.center.x, $0.kind.rawValue) < ($1.center.x, $1.kind.rawValue) }
+    }
+
+    /// 体の軸(Vision の座標: 左下原点のピクセル。腰 → 首)が垂直になる角度。
+    /// 上が右に倒れている(時計回りにずれている)なら、反時計回り(負の角度)に回すと立つ
+    static func torso(top: CGPoint, bottom: CGPoint, _ size: CGSize) -> SubjectMark? {
+        let dx = Double(top.x - bottom.x), dy = Double(top.y - bottom.y)
+        guard dy > 2, dx * dx + dy * dy > 4 else { return nil }   // 首が腰より上にない(寝ている・逆さ)ものは使わない
+        let deg = normalize(atan2(dy, dx) * 180 / .pi - 90)
+        guard abs(deg) < 30 else { return nil }
+        func normalized(_ p: CGPoint) -> CGPoint { CGPoint(x: p.x / size.width, y: 1 - p.y / size.height) }
+        return SubjectMark(kind: .torso, angle: deg, from: normalized(top), to: normalized(bottom))
     }
 
     /// 2 点(Vision の座標: 左下原点のピクセル)を結ぶ線が水平になる角度
@@ -359,13 +397,14 @@ extension TiltEstimator {
             + subjectIDs(r.subjects).map { id, m in PreviewOverlay.Mark(label: id, from: m.from, to: m.to, color: .subject) }
     }
 
-    /// 人物の線の番号(目は E1, E2…、肩は S1, S2…。左から順)
+    /// 人物の線の番号(目は E1, E2…、肩は S1, S2…、体の軸は T1, T2…。左から順)
     public static func subjectIDs(_ marks: [SubjectMark]) -> [(String, SubjectMark)] {
-        var eyes = 0, shoulders = 0
+        var eyes = 0, shoulders = 0, torsos = 0
         return marks.map { m in
             switch m.kind {
             case .eyes: eyes += 1; return ("E\(eyes)", m)
             case .shoulders: shoulders += 1; return ("S\(shoulders)", m)
+            case .torso: torsos += 1; return ("T\(torsos)", m)
             }
         }
     }

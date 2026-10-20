@@ -198,7 +198,7 @@ case "tilt":
             }
             if r.subjects.isEmpty { print("  人物: 見つからない") }
             for m in r.subjects {
-                print(String(format: "  人物(%@): %+.2f°  位置 (%.2f, %.2f)", m.kind == .eyes ? "目" : "肩", m.angle, m.center.x, m.center.y))
+                print(String(format: "  人物(%@): %+.2f°  位置 (%.2f, %.2f)  確からしさ %.2f", ["eyes": "目", "shoulders": "肩", "torso": "体の軸"][m.kind.rawValue]!, m.angle, m.center.x, m.center.y, m.confidence))
             }
         } catch {
             FileHandle.standardError.write("\(url.lastPathComponent): \(error)\n".data(using: .utf8)!)
