@@ -1496,6 +1496,22 @@ final class TiltEstimatorTests: XCTestCase {
         XCTAssertTrue(TiltEstimator.segments(in: flat).isEmpty)
     }
 
+    /// 縦の線が左右で開いているとき、中央での値を返す。開いていなければ nil
+    func testVerticalFan() {
+        func v(_ x: Double, _ angle: Double) -> TiltEstimator.Segment {
+            TiltEstimator.Segment(id: 1, axis: .vertical, angle: angle, length: 0.2,
+                                  from: CGPoint(x: x, y: 0.2), to: CGPoint(x: x, y: 0.6))
+        }
+        // 傾き +2°、左右で ±2° 開く
+        let fan = TiltEstimator.verticalFan([v(0.1, 0.4), v(0.3, 1.2), v(0.7, 2.8), v(0.9, 3.6)])!
+        XCTAssertEqual(fan.angleAtCenter, 2, accuracy: 1e-9)
+        XCTAssertEqual(fan.angleAtLeft, 0, accuracy: 1e-9)
+        XCTAssertEqual(fan.angleAtRight, 4, accuracy: 1e-9)
+        XCTAssertNil(TiltEstimator.verticalFan([v(0.1, 2), v(0.3, 2.1), v(0.7, 1.9), v(0.9, 2)]), "開いていない")
+        XCTAssertNil(TiltEstimator.verticalFan([v(0.4, 0), v(0.45, 1), v(0.5, 2), v(0.55, 3)]), "左右に散らばっていない")
+        XCTAssertNil(TiltEstimator.verticalFan([v(0.1, 0), v(0.9, 4)]), "本数が足りない")
+    }
+
     func testCombinedAngleWeightsByLength() {
         func seg(_ angle: Double, _ length: Double) -> TiltEstimator.Segment {
             TiltEstimator.Segment(id: 1, axis: .horizontal, angle: angle, length: length, from: .zero, to: .zero)

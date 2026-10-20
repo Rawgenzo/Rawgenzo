@@ -50,6 +50,38 @@ public enum TiltEstimator {
     /// 返す線分の数の上限(水平・垂直それぞれ。片方の向きだけで埋まらないように)
     public static let maxSegmentsPerAxis = 10
 
+    /// 縦の線が左右で開いている(カメラを上下に向けて撮った)ときの手がかり
+    public struct VerticalFan: Equatable, Sendable {
+        /// 画像の中央(左右の真ん中)での縦の線の角度。上下に向けた分の影響を受けないので、これが傾き
+        public var angleAtCenter: Double
+        /// 左端と右端での角度(当てはめた直線の値)
+        public var angleAtLeft: Double
+        public var angleAtRight: Double
+        /// 当てはめに使った縦の線の本数
+        public var count: Int
+    }
+
+    /// 縦の線の角度を、線の左右の位置に対して(長さで重みを付けて)直線で当てはめる。
+    /// 左右で 1.5° 以上変わるなら開いているとみなす。カメラを上下に向けると縦の線は画像の中央から外へ扇形に開き、
+    /// 中央の縦の線だけがその影響を受けない(DSC03425: 左の戸の枠 +1.0°、中央 +3.1°、右の柱 +3.6〜+6.1°)
+    public static func verticalFan(_ segments: [Segment]) -> VerticalFan? {
+        let v = segments.filter { $0.axis == .vertical }
+        guard v.count >= 4 else { return nil }
+        let xs = v.map { Double($0.from.x + $0.to.x) / 2 }
+        guard let lo = xs.min(), let hi = xs.max(), hi - lo >= 0.3 else { return nil }
+        let ws = v.map(\.length), ys = v.map(\.angle)
+        let total = ws.reduce(0, +)
+        let mx = zip(ws, xs).map(*).reduce(0, +) / total
+        let my = zip(ws, ys).map(*).reduce(0, +) / total
+        var sxx = 0.0, sxy = 0.0
+        for k in v.indices { sxx += ws[k] * (xs[k] - mx) * (xs[k] - mx); sxy += ws[k] * (xs[k] - mx) * (ys[k] - my) }
+        guard sxx > 0 else { return nil }
+        let slope = sxy / sxx
+        func at(_ x: Double) -> Double { my + slope * (x - mx) }
+        guard abs(at(1) - at(0)) >= 1.5 else { return nil }
+        return VerticalFan(angleAtCenter: at(0.5), angleAtLeft: at(0), angleAtRight: at(1), count: v.count)
+    }
+
     /// 複数の線分の角度を、長さで重みを付けて平均する(AI が選んだ線から角度を出す)
     public static func combinedAngle(_ segments: [Segment]) -> (angle: Double, spread: Double)? {
         let total = segments.map(\.length).reduce(0, +)

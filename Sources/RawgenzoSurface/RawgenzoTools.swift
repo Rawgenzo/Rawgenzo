@@ -638,7 +638,8 @@ public enum RawgenzoTools {
                 + "各線の角度、人物の目(E1…)・肩(S1…)を結ぶ線と、首と腰を結ぶ体の軸(T1…。垂直の手がかり)の角度。"
                 + "角度はどれも set_crop の angle に入れるとその線が水平(垂直)になる値で、傾き補正の前からの値(今の angle に足すのではない)。"
                 + "画像を見て、本当に水平・垂直なもの(建物や家具の縁・柱・水平線)の番号を segments に渡すと、長さで重みを付けた角度を返す。"
-                + "奥へ伸びる線(遠近で斜めに見える)・ブラインドや斜めに置かれた物・カメラを上下に向けて撮ったときの縦の線は使わない。"
+                + "奥へ伸びる線(遠近で斜めに見える)・ブラインドや斜めに置かれた物は使わない。"
+                + "縦の線が左右で開いているとき(カメラを上下に向けて撮った)は vertical_fan の angle_at_center を使うか、中央に近い縦の線を選ぶ。"
                 + "人物写真では人物の線(subjects)も手がかりになる。目・肩は首をかしげたり肩を傾けたりすると大きく出るので、"
                 + "「身体の傾き」には体の軸(T)を使い、1 本では決めない。体の軸はその人の姿勢(寄りかかる・前かがみ)も含む。"
                 + "confidence が 0.3 未満の線(座っていて腰が隠れているときの体の軸など)は当てにしない。"
@@ -691,6 +692,12 @@ public enum RawgenzoTools {
             }
             if !chosen.isEmpty { o["chosen"] = .object(chosen) }
             if report.segments.isEmpty { notes.append("長い直線が見つからない(自然の風景など)。人物の線か、目で見て決める") }
+            if let fan = TiltEstimator.verticalFan(report.segments) {
+                o["vertical_fan"] = ["angle_at_center": deg(fan.angleAtCenter), "angle_at_left": deg(fan.angleAtLeft),
+                                     "angle_at_right": deg(fan.angleAtRight), "count": .number(Double(fan.count))]
+                notes.append(String(format: "縦の線が左右で開いている(左端 %+.1f°、右端 %+.1f°)。カメラを上か下に向けて撮っている。"
+                    + "傾きは画像の中央での値 %+.1f°(端の縦の線を選ぶとずれる)", fan.angleAtLeft, fan.angleAtRight, fan.angleAtCenter))
+            }
             if photo.lensCorrection != nil, photo.effectiveLensSettings(photo.settings)?.distortion == false {
                 notes.append("歪曲補正が切れているので、画面の端の直線は曲がって測りにくい(set_lens_correction で distortion をオンにすると正確になる)")
             }

@@ -196,6 +196,10 @@ case "tilt":
                 let file = dir.appendingPathComponent(url.deletingPathExtension().lastPathComponent + "_tilt.jpg")
                 try PreviewEncoder.jpeg(out).write(to: file)
             }
+            if let fan = TiltEstimator.verticalFan(r.segments) {
+                print(String(format: "  縦の線が開いている: 左端 %+.2f°  中央 %+.2f°  右端 %+.2f°(%d 本)",
+                             fan.angleAtLeft, fan.angleAtCenter, fan.angleAtRight, fan.count))
+            }
             if r.subjects.isEmpty { print("  人物: 見つからない") }
             for m in r.subjects {
                 print(String(format: "  人物(%@): %+.2f°  位置 (%.2f, %.2f)  確からしさ %.2f", ["eyes": "目", "shoulders": "肩", "torso": "体の軸"][m.kind.rawValue]!, m.angle, m.center.x, m.center.y, m.confidence))
