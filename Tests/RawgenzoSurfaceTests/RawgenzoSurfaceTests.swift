@@ -492,6 +492,22 @@ final class RawgenzoToolsSampleTests: XCTestCase {
         XCTAssertEqual(c.angle, 10)
         XCTAssertTrue(c.isInsideImage(imageAspect: aspect))
 
+        // 傾きを小さくしても枠は広がらない。maximize で、収まる最大まで戻す(アプリのボタンと同じ計算)
+        let shrunkAt10 = c
+        r = try json(surface.call("set_crop", arguments: ["photos": [.string(id)], "angle": 2], as: ai))
+        c = try XCTUnwrap(SidecarStore().load(for: folder.appendingPathComponent(id))?.settings.crop)
+        XCTAssertEqual(c.width, shrunkAt10.width, accuracy: 1e-9, "自動では広げない")
+        r = try json(surface.call("set_crop", arguments: ["photos": [.string(id)], "maximize": true], as: ai))
+        c = try XCTUnwrap(SidecarStore().load(for: folder.appendingPathComponent(id))?.settings.crop)
+        let expected = CropSettings(x: shrunkAt10.x, y: shrunkAt10.y, width: shrunkAt10.width, height: shrunkAt10.height,
+                                    angle: 2, aspect: shrunkAt10.aspect).maximized(imageAspect: aspect)
+        XCTAssertEqual(c.width, expected.width, accuracy: 1e-9)
+        XCTAssertGreaterThan(c.width, shrunkAt10.width)
+        XCTAssertTrue(c.isInsideImage(imageAspect: aspect))
+        XCTAssertEqual(c.width * aspect / c.height, 1, accuracy: 1e-6, "比率(1:1)を保つ")
+        XCTAssertTrue(surface.call("set_crop", arguments: ["photos": [.string(id)], "maximize": true,
+                                                           "x": 0, "y": 0, "width": 0.5, "height": 0.5], as: ai).isError)
+
         // 解除
         r = try json(surface.call("set_crop", arguments: ["photos": [.string(id)], "reset": true], as: ai))
         XCTAssertEqual(r["results"]?.arrayValue?.first?["crop"]?["to"], .null)

@@ -197,7 +197,9 @@ ARW → CameraRegistry が機種判定 → CameraProfile.makeSource → RAWSourc
   人の変更の記録(`noteHumanChange`)は、写真のフォルダに限らず全部の操作面に送る
 - **切り抜き(set_crop)**: 枠の座標は傾き補正の後・切り抜く前の画像に対する比率。AI は get_preview の `ignore_crop` で
   切り抜く前の全体を見て枠を決める(傾きは当てたまま見せる。枠の座標が傾けた後の画像に対するものなので)。
-  枠は CLI と同じく、はみ出すときだけ `fitted` で収める。枠と比率の両方が来たら中心を保って縮める(`CropSettings.shrunk(toAspect:)`)
+  枠は CLI と同じく、はみ出すときだけ `fitted` で収める。枠と比率の両方が来たら中心を保って縮める(`CropSettings.shrunk(toAspect:)`)。
+  `maximize` はアプリの「収まる最大まで広げる」と同じ `maximized`(傾きを +2.5° → +2.05° と戻した AI が、縮んだ枠を広げる手段を
+  持たず、アプリのボタンを案内した。2026-10-20)
 - **get_preview の region・show_crop_frame・guide**: 縁の傾きを見るために、AI が 1600px の全体を出し、
   それでも読めずに道具の結果の一時ファイルを sips で拡大していた(2026-10-19 の試験。ほかの MCP クライアントではできない)。
   region は範囲を切り抜き枠として現像する(processFitting が範囲の大きさで解像度を決め、等倍が上限)。

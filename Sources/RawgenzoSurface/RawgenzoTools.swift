@@ -539,6 +539,8 @@ public enum RawgenzoTools {
                 + "get_preview に ignore_crop: true を付けた画像のピクセル座標を、その幅・高さで割った値になる。"
                 + "aspect だけを渡すとその比率で中央に最大の枠、枠と aspect の両方なら枠の中心を保って比率に合わせて縮める。"
                 + "angle だけを渡すと今の枠のまま傾ける。枠が傾けた画像からはみ出すときは、はみ出さない大きさに縮める(結果の notes)。"
+                + "maximize: true で、今の比率のまま傾けた画像に収まる最大の大きさに広げる(アプリの「収まる最大まで広げる」と同じ。"
+                + "位置はなるべく動かさない)。傾きを小さくしたとき、前に縮めた枠を戻すのに使う。angle や aspect と一緒に使える。"
                 + "reset: true で切り抜きも傾きも無しに戻す。複数の写真に同じ指定を当てられる",
             input: .object([
                 .init("photos", .array(of: photoID, description: "切り抜く写真の ID", minItems: 1, maxItems: 1000)),
@@ -548,6 +550,7 @@ public enum RawgenzoTools {
                                        minimum: CropSettings.angleRange.lowerBound, maximum: CropSettings.angleRange.upperBound)),
                 .init("aspect", .string("縦横比。free(自由)・original(元の比率)・square(1:1)・r3x2・r4x3・r16x9・r2x3(縦)・r4x5(縦)",
                                         oneOf: aspectNames)),
+                .init("maximize", .boolean("true で、比率を保って収まる最大の大きさに広げる(x・y・width・height と一緒には使えない)")),
                 .init("reset", .boolean("true で切り抜きと傾き補正を無くす(ほかの項目と一緒には使えない)")),
             ], required: ["photos"]),
             effect: .modify)) { args, ctx in
@@ -556,12 +559,16 @@ public enum RawgenzoTools {
             let reset = args["reset"]?.boolValue == true
             let angle = args["angle"]?.doubleValue
             let aspect = args["aspect"]?.stringValue.flatMap(AspectRatio.init(rawValue:))
-            if reset, !given.isEmpty || angle != nil || aspect != nil {
+            let maximize = args["maximize"]?.boolValue == true
+            if reset, !given.isEmpty || angle != nil || aspect != nil || maximize {
                 return .error("reset はほかの項目と一緒には使えません")
             }
+            if maximize, !given.isEmpty {
+                return .error("maximize は枠(x・y・width・height)と一緒には使えません(枠を指定するか、今の枠を広げるかのどちらか)")
+            }
             if !given.isEmpty, given.count < 4 { return .error("x・y・width・height は 4 つそろえて渡してください") }
-            if !reset, given.isEmpty, angle == nil, aspect == nil {
-                return .error("枠(x・y・width・height)・aspect・angle・reset のどれかを指定してください")
+            if !reset, given.isEmpty, angle == nil, aspect == nil, !maximize {
+                return .error("枠(x・y・width・height)・aspect・angle・maximize・reset のどれかを指定してください")
             }
             if given.count == 4, args["x"]!.doubleValue! + args["width"]!.doubleValue! > 1 + 1e-9
                 || args["y"]!.doubleValue! + args["height"]!.doubleValue! > 1 + 1e-9 {
@@ -605,7 +612,13 @@ public enum RawgenzoTools {
                     if !c.isInsideImage(imageAspect: imageAspect) { c = c.fitted(imageAspect: imageAspect) }
                     // 等しいかではなく差の大きさで比べる。y 0.19・高さ 0.81 のように下端がちょうど 1 の枠は、
                     // clamped の 1 - 0.81 = 0.18999999999999995 で値がわずかに変わり、縮めていないのに注記が付いた(試験)
-                    if differs(c, requested) {
+                    if maximize {
+                        // アプリの「収まる最大まで広げる」と同じ計算。傾きを小さくしても枠は自動では広がらないので、
+                        // AI が +2.5° → +2.05° と戻したとき、縮んだ枠のまま残った(2026-10-20 の試験。AI はアプリのボタンを案内した)
+                        let widened = c.maximized(imageAspect: imageAspect)
+                        if differs(widened, c) { notes.append("収まる最大の大きさにした") }
+                        c = widened
+                    } else if differs(c, requested) {
                         notes.append("枠が傾けた画像からはみ出すので、はみ出さない大きさに縮めた")
                     }
                     after.crop = c == .full ? nil : c
