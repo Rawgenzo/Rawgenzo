@@ -163,13 +163,25 @@ public enum RawgenzoTools {
                 + "画像はトークンを多く使うので、数値(get_stats)で判断できないときだけ使う。"
                 + "縮小して描くのでシャープネスの効果は見えない。"
                 + "ignore_crop を true にすると切り抜く前の全体を返す(傾き補正は当てたまま)。"
-                + "その画像のピクセル座標を幅・高さで割った値が、set_crop の座標になる",
+                + "その画像のピクセル座標を幅・高さで割った値が、set_crop の座標になる。"
+                + "region を渡すと、その範囲だけを高い解像度で返す(縁の傾き・ピントの確認に。全体を大きく出すよりトークンが少ない)。"
+                + "show_crop_frame は切り抜く前の全体に今の枠を描き(枠の外は暗く)、guide は構図ガイドを枠の中(枠を描かないときは画像全体)に描く。"
+                + "結果の文字に、等倍に対する倍率が付く",
             input: .object([
                 .init("photo", photoID),
                 .init("long_edge", .integer("長辺のピクセル数(既定 768)", minimum: 128, maximum: 1600)),
                 .init("changes", changesSchema(detailed: false)),
                 .init("ignore_crop", .boolean("切り抜く前の全体を返すか(既定 false)")),
                 .init("look", lookTrialSchema),
+                .init("region", .object([
+                    .init("x", .number(minimum: 0, maximum: 1)), .init("y", .number(minimum: 0, maximum: 1)),
+                    // 切り抜きの処理が枠を 5% 以上に広げるので、それより小さい範囲は受け付けない(黙って広がると倍率を誤る)
+                    .init("width", .number(minimum: 0.05, maximum: 1)), .init("height", .number(minimum: 0.05, maximum: 1)),
+                ], required: ["x", "y", "width", "height"],
+                   description: "返す範囲。set_crop と同じ座標(傾き補正の後・切り抜く前の画像に対する比率、左上が原点)。幅・高さは 0.05 以上。等倍より大きくはしない")),
+                .init("show_crop_frame", .boolean("切り抜く前の全体に今の切り抜き枠を描くか(既定 false。true なら ignore_crop も true として扱う)")),
+                .init("guide", .string("重ねる構図ガイド: " + CompositionGuides.all.map { "\($0.id)(\($0.displayName))" }.joined(separator: "・"),
+                                       oneOf: CompositionGuides.all.map(\.id))),
             ], required: ["photo"]),
             effect: .read)) { args, _ in
             let photo = try ws.photo(args["photo"]!.stringValue!)
@@ -178,17 +190,46 @@ public enum RawgenzoTools {
             if let look = args["look"] {
                 if let error = applyTrialLook(look, to: &settings, ws: ws) { return .error(error) }
             }
-            if args["ignore_crop"]?.boolValue == true {
+            let region = args["region"]
+            let showFrame = args["show_crop_frame"]?.boolValue == true
+            let guide = args["guide"]?.stringValue.flatMap(CompositionGuides.guide(id:))
+            if region != nil, showFrame || guide != nil {
+                return .error("region は show_crop_frame・guide と一緒には使えません")
+            }
+            let frame = settings.crop
+            var notes: [String] = []
+            if let r = region {
+                let rect = CropSettings(x: r["x"]!.doubleValue!, y: r["y"]!.doubleValue!,
+                                        width: r["width"]!.doubleValue!, height: r["height"]!.doubleValue!,
+                                        angle: settings.crop?.angle ?? 0)
+                guard rect.x + rect.width <= 1 + 1e-9, rect.y + rect.height <= 1 + 1e-9 else {
+                    return .error("region が画像の外に出ています(x + width と y + height は 1 以下)")
+                }
+                // 範囲を切り抜き枠として現像すると、processFitting がその範囲の大きさで解像度を決める
+                settings.crop = rect
+            } else if showFrame || args["ignore_crop"]?.boolValue == true {
                 // 枠の座標は傾けた後の画像に対するものなので、傾きは残して枠だけ全体にする
                 settings.crop = settings.crop.flatMap { $0.angle == 0 ? nil : CropSettings(angle: $0.angle) }
+                if showFrame, frame == nil || frame.map({ $0.width >= 1 && $0.height >= 1 }) == true {
+                    notes.append("切り抜き枠が無い(全体)ので、枠は描いていない")
+                }
             }
-            let image = try ws.engine.pipeline.processFitting(photo, settings: settings,
+            var image = try ws.engine.pipeline.processFitting(photo, settings: settings,
                                                               longEdge: args["long_edge"]?.intValue ?? 768)
+            let size = photo.source.nativeSize
+            let shown = settings.crop ?? .full
+            let scale = Double(image.extent.width) / (Double(size.width) * shown.width)
+            if showFrame || guide != nil {
+                let f = showFrame ? frame.map { CGRect(x: $0.x, y: $0.y, width: $0.width, height: $0.height) } : nil
+                image = try PreviewOverlay.draw(on: image, frame: f, guides: guide.map { [$0] } ?? [])
+            }
             let jpeg = try PreviewEncoder.jpeg(image, quality: 0.75)
             var content: [ToolContent] = [
                 .image(data: jpeg, mimeType: "image/jpeg"),
                 .text("\(Int(image.extent.width))×\(Int(image.extent.height))"),
+                .text(String(format: "等倍の %.2f 倍", scale)),
             ]
+            if !notes.isEmpty { content.append(.text(notes.joined(separator: "。"))) }
             if let w = openPhotoWarning(ws, [photo.url]) { content.append(.text("open_photo_warning: \(w)")) }
             return ToolResult(content)
         }

@@ -406,6 +406,45 @@ final class RawgenzoToolsSampleTests: XCTestCase {
         XCTAssertNotNil(again["results"]?.arrayValue?.first?["notes"], "もともと初期値")
     }
 
+    /// get_preview の region・show_crop_frame・guide
+    func testPreviewRegionFrameAndGuide() throws {
+        func texts(_ r: ToolResult) -> [String] { r.content.compactMap { if case .text(let t) = $0 { return t } else { return nil } } }
+        func size(_ r: ToolResult) throws -> (Double, Double) {
+            XCTAssertFalse(r.isError, r.summary)
+            let n = try XCTUnwrap(texts(r).first).split(separator: "×").compactMap { Double($0) }
+            return (n[0], n[1])
+        }
+        let photoSize = try XCTUnwrap(try json(surface.call("get_photo", arguments: ["photo": .string(id)], as: ai))["size"]?
+            .arrayValue?.compactMap(\.doubleValue))
+        // 5% 四方の小さな範囲は、等倍を上限にする(拡大しない)
+        let tiny = surface.call("get_preview", arguments: ["photo": .string(id), "long_edge": 1600,
+                                                           "region": ["x": 0.4, "y": 0.4, "width": 0.05, "height": 0.05]], as: ai)
+        let t = try size(tiny)
+        XCTAssertEqual(t.0, (photoSize[0] * 0.05).rounded(), accuracy: 2)
+        XCTAssertTrue(texts(tiny).contains("等倍の 1.00 倍"), "\(texts(tiny))")
+        // 範囲の縦横比で返る
+        let half = try size(surface.call("get_preview", arguments: ["photo": .string(id), "long_edge": 400,
+                                                                    "region": ["x": 0, "y": 0, "width": 0.5, "height": 0.25]], as: ai))
+        XCTAssertEqual(half.0 / half.1, photoSize[0] * 0.5 / (photoSize[1] * 0.25), accuracy: 0.02)
+
+        // 枠を描く: 切り抜く前の全体の大きさで返り、枠を描かない全体とは画像が違う
+        _ = try json(surface.call("set_crop", arguments: ["photos": [.string(id)], "x": 0.2, "y": 0.2, "width": 0.5, "height": 0.5], as: ai))
+        let framed = surface.call("get_preview", arguments: ["photo": .string(id), "long_edge": 300, "show_crop_frame": true,
+                                                             "guide": "thirds"], as: ai)
+        let whole = surface.call("get_preview", arguments: ["photo": .string(id), "long_edge": 300, "ignore_crop": true], as: ai)
+        XCTAssertEqual(try size(framed).0 / size(framed).1, photoSize[0] / photoSize[1], accuracy: 0.02)
+        XCTAssertNotEqual(framed.content.first, whole.content.first)
+
+        for bad: JSONValue in [
+            ["photo": .string(id), "region": ["x": 0.6, "y": 0, "width": 0.5, "height": 0.5]],
+            ["photo": .string(id), "region": ["x": 0.4, "y": 0.4, "width": 0.01, "height": 0.01]],   // 5% 未満
+            ["photo": .string(id), "region": ["x": 0, "y": 0, "width": 0.5, "height": 0.5], "guide": "thirds"],
+            ["photo": .string(id), "guide": "nothing"],
+        ] {
+            XCTAssertTrue(surface.call("get_preview", arguments: bad, as: ai).isError, "\(bad)")
+        }
+    }
+
     /// get_preview の look は仮に当てるだけで、保存しない
     func testTrialLookIsNotSaved() throws {
         let plain = surface.call("get_preview", arguments: ["photo": .string(id), "long_edge": 256], as: ai)

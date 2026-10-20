@@ -60,7 +60,8 @@ Sources/RAWCore/            現像エンジン。UI 非依存(SwiftUI を import
                             PreviewZoom(表示倍率の計算)、RAWMetadata、RAWError
   Observe/                  ImageStats(現像結果の数値の観測: 輝度・白飛び・ヒストグラム・8×8 区画)、
                             DevelopPipeline.processFitting(長辺を指定して縮小現像)、PreviewEncoder(縮小 JPEG)、
-                            ExposureSolver(明るさ・白飛びの目標から露出とハイライト回復を二分法で探す)
+                            ExposureSolver(明るさ・白飛びの目標から露出とハイライト回復を二分法で探す)、
+                            PreviewOverlay(AI に見せる画像に切り抜き枠・構図ガイドを描く)
   Sidecar/                  SidecarStore(<RAW名>.rawgenzo.json)
   Export/                   Exporter(JPEG / HEIF / 16bit TIFF / HDR HEIF)
   Photo.swift               Photo と RAWEngine(アプリ・CLI の窓口)
@@ -195,6 +196,11 @@ ARW → CameraRegistry が機種判定 → CameraProfile.makeSource → RAWSourc
 - **切り抜き(set_crop)**: 枠の座標は傾き補正の後・切り抜く前の画像に対する比率。AI は get_preview の `ignore_crop` で
   切り抜く前の全体を見て枠を決める(傾きは当てたまま見せる。枠の座標が傾けた後の画像に対するものなので)。
   枠は CLI と同じく、はみ出すときだけ `fitted` で収める。枠と比率の両方が来たら中心を保って縮める(`CropSettings.shrunk(toAspect:)`)
+- **get_preview の region・show_crop_frame・guide**: 縁の傾きを見るために、AI が 1600px の全体を出し、
+  それでも読めずに道具の結果の一時ファイルを sips で拡大していた(2026-10-19 の試験。ほかの MCP クライアントではできない)。
+  region は範囲を切り抜き枠として現像する(processFitting が範囲の大きさで解像度を決め、等倍が上限)。
+  **CropSettings.clamped は枠を 5% 以上に広げる**ので、region の幅・高さも 0.05 以上にした(小さい範囲が黙って広がり、倍率を誤って返した)。
+  結果の文字に「等倍の k 倍」を付ける(AI がピクセルから角度や大きさを測るため)
 - **「この写真」の取り違えは結果で知らせる**。1 枚の写真を指す呼び出しで、対象がアプリで開いている写真と違えば、
   結果に `open_photo_warning` を付ける(`RawgenzoTools.openPhotoWarning`。複数の写真をまとめて扱う呼び出しには付けない)。
   説明文に「get_app_state で確かめる」と書いてあっても、AI は会話の前のほうで決めた写真を「この写真」と解釈し、
