@@ -35,6 +35,7 @@ swift run rawdev config                      # 設定ファイルの書き出し
 swift run rawdev looks                       # ルック一覧
 swift run rawdev params                      # 数値パラメータの一覧(ParameterCatalog)
 swift run rawdev stats RAWsample --preview /tmp/p   # 現像結果の統計(ImageStats)と AI に見せる縮小 JPEG
+swift run rawdev tilt RAWsample --preview /tmp/p    # 傾きの手がかり(番号付きの直線・人物の線)と、番号を描いた JPEG
 swift run rawdev mcp AItrial --log AItrial/mcp-log.jsonl   # MCP サーバー(stdio)。普段は MCP クライアントが起動する
 ```
 
@@ -61,7 +62,8 @@ Sources/RAWCore/            現像エンジン。UI 非依存(SwiftUI を import
   Observe/                  ImageStats(現像結果の数値の観測: 輝度・白飛び・ヒストグラム・8×8 区画)、
                             DevelopPipeline.processFitting(長辺を指定して縮小現像)、PreviewEncoder(縮小 JPEG)、
                             ExposureSolver(明るさ・白飛びの目標から露出とハイライト回復を二分法で探す)、
-                            PreviewOverlay(AI に見せる画像に切り抜き枠・構図ガイドを描く)
+                            PreviewOverlay(AI に見せる画像に切り抜き枠・構図ガイド・番号付きの線を描く)、
+                            TiltEstimator(傾きの手がかり: 長い直線と、Vision による人物の目・肩の線)
   Sidecar/                  SidecarStore(<RAW名>.rawgenzo.json)
   Export/                   Exporter(JPEG / HEIF / 16bit TIFF / HDR HEIF)
   Photo.swift               Photo と RAWEngine(アプリ・CLI の窓口)
@@ -74,7 +76,7 @@ Sources/OperationSurface/   AI などに操作を委ねる汎用の操作面(Fou
   MCPRouter                 MCP のメッセージを、起動中のアプリ(ソケットの先)か自分の操作面かに、メッセージごとに振り分ける
 Sources/RawgenzoSurface/    Rawgenzo の領域定義(RAWCore と OperationSurface を使う)
   RawgenzoWorkspace         作業フォルダと写真(ID = 作業フォルダの中ならファイル名、外なら RAW ファイルの絶対パス)
-  RawgenzoTools             道具: get_app_state / list_photos / get_photo / get_stats / get_preview / adjust / set_crop /
+  RawgenzoTools             道具: get_app_state / list_photos / get_photo / get_stats / get_preview / adjust / set_crop / estimate_tilt /
                             list_looks / set_look / set_lens_correction / set_hdr_output / reset_settings / solve_exposure
                             (+ undo / recent_operations)
   RawgenzoAgentHost         アプリの中でソケット(~/.Rawgenzo/agent.sock)を受け、作業フォルダごとの操作面につなぐ。
@@ -201,6 +203,16 @@ ARW → CameraRegistry が機種判定 → CameraProfile.makeSource → RAWSourc
   region は範囲を切り抜き枠として現像する(processFitting が範囲の大きさで解像度を決め、等倍が上限)。
   **CropSettings.clamped は枠を 5% 以上に広げる**ので、region の幅・高さも 0.05 以上にした(小さい範囲が黙って広がり、倍率を誤って返した)。
   結果の文字に「等倍の k 倍」を付ける(AI がピクセルから角度や大きさを測るため)
+- **傾き(estimate_tilt)は、道具が測り、AI が選ぶ**。水平の基準は 1 つではない(同じ写真で棚の線なら −0.8°、
+  人物なら +1.2° で、オーナーは人物写真として +1.2° を選んだ。2026-10-20)。最初の試作は画素ごとのエッジの向きを数えて
+  1 つの角度を出し、合成画像では ±0.15° で当てたが、本物の写真では雲・水面や、奥へ伸びる手すり(遠近で斜めに見える線)に
+  引っぱられて水平と垂直が最大 11° 食い違った。今の形は、長い直線(LSD を簡単にした領域成長 → 主成分分析で当てはめ →
+  同じ直線のかけらをつなぐ)に番号を付けて画像に描き、本当に水平・垂直な線を AI が選んで segments で渡す。
+  直線は交点で途切れるのでつなぐ(つながないと格子の線が 0.18 の長さのかけらになった)。向きごとに 10 本まで返す
+  (合わせて 15 本にしたら水平だけで埋まった)。番号は長い順で、呼ぶたびに同じ。角度の向きは、CropStage で既知の角度だけ
+  回した合成画像から打ち消す角度が出るかでテストしている。測るのはレンズ補正の後・切り抜きと傾きとルックを外した画像
+- **画像に文字を描くとき、`CTLineGetImageBounds` は今の文字の位置からの範囲を返す**。`textPosition` を 0 にしてから測る
+  (しないと 1 つ前の札の位置だけずれ、番号が札から離れた)
 - **「この写真」の取り違えは結果で知らせる**。1 枚の写真を指す呼び出しで、対象がアプリで開いている写真と違えば、
   結果に `open_photo_warning` を付ける(`RawgenzoTools.openPhotoWarning`。複数の写真をまとめて扱う呼び出しには付けない)。
   説明文に「get_app_state で確かめる」と書いてあっても、AI は会話の前のほうで決めた写真を「この写真」と解釈し、

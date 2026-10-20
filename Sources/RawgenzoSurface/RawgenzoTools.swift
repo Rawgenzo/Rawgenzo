@@ -21,6 +21,8 @@ public enum RawgenzoTools {
         - 明るさを目標に合わせる・揃える・白飛びを抑えるときは solve_exposure に目標を渡す(値を試し続けない)
         - それ以外は adjust で変える。写真ごとに違う変更も 1 回の呼び出しにまとめられる。結果に変更後の主な統計が付く
         - 切り抜き・傾き補正は set_crop。枠を決めるときは get_preview に ignore_crop を付けて、切り抜く前の全体を見る
+        - 水平を直すときは、目測より estimate_tilt を使う。水平の基準(建物の線か人物か)を頼まれていなければ、
+          どちらを基準にしたかを伝え、食い違いが大きければ人に聞く
         - 「シネマ調」「フィルムっぽく」「モノクロに」のような雰囲気の指示は、まず list_looks でルック(色の作りのひな形)を確かめ、
           合うものがあれば set_look で当てる。足りない分だけ adjust で整える。get_preview の look で、保存せずに試せる
         - レンズ補正は set_lens_correction、HDR ディスプレイ向けの出力は set_hdr_output、全部を初期値に戻すのは reset_settings
@@ -293,6 +295,7 @@ public enum RawgenzoTools {
         }
 
         registerCrop(on: surface, workspace: ws)
+        registerTilt(on: surface, workspace: ws)
         registerLook(on: surface, workspace: ws)
         registerOptions(on: surface, workspace: ws)
     }
@@ -624,6 +627,80 @@ public enum RawgenzoTools {
     /// 枠が目に見えて違うか(小数の誤差は同じとみなす)
     static func differs(_ a: CropSettings, _ b: CropSettings) -> Bool {
         [a.x - b.x, a.y - b.y, a.width - b.width, a.height - b.height, a.angle - b.angle].contains { abs($0) > 1e-6 }
+    }
+
+    // MARK: 傾きの推定
+
+    static func registerTilt(on surface: Surface, workspace ws: RawgenzoWorkspace) {
+        surface.register(ToolDescriptor(
+            name: "estimate_tilt", title: "傾きの手がかり",
+            description: "写真の傾きを直すための手がかりを返す。長い直線(水平・垂直から 10° 以内)に番号を付けた画像と、"
+                + "各線の角度、人物の目(E1…)・肩(S1…)を結ぶ線の角度。"
+                + "角度はどれも set_crop の angle に入れるとその線が水平(垂直)になる値で、傾き補正の前からの値(今の angle に足すのではない)。"
+                + "画像を見て、本当に水平・垂直なもの(建物や家具の縁・柱・水平線)の番号を segments に渡すと、長さで重みを付けた角度を返す。"
+                + "奥へ伸びる線(遠近で斜めに見える)・ブラインドや斜めに置かれた物・カメラを上下に向けて撮ったときの縦の線は使わない。"
+                + "人物写真では目・肩の線(subjects)も手がかりになるが、首をかしげる人もいるので 1 本では決めない。"
+                + "線と人物で食い違うとき、どれを基準にするか決められないときは人に聞く。2 秒ほどかかる",
+            input: .object([
+                .init("photo", photoID),
+                .init("segments", .array(of: .integer(minimum: 1), description: "水平・垂直の基準にする直線の番号(前の結果の画像の番号)")),
+                .init("subjects", .array(of: .string(), description: "基準にする人物の線(E1・S2 など)")),
+                .init("image", .boolean("番号を描いた画像を返すか(既定 true。番号が分かっていて角度だけ欲しいときは false)")),
+                .init("long_edge", .integer("画像の長辺(既定 768)", minimum: 384, maximum: 1600)),
+            ], required: ["photo"]),
+            effect: .read)) { args, _ in
+            let photo = try ws.photo(args["photo"]!.stringValue!)
+            let report = try TiltEstimator.estimate(photo, settings: photo.settings, pipeline: ws.engine.pipeline)
+            let subjects = TiltEstimator.subjectIDs(report.subjects)
+            func point(_ p: CGPoint) -> JSONValue { [.number(round4(Double(p.x))), .number(round4(Double(p.y)))] }
+            func deg(_ v: Double) -> JSONValue { .number((v * 100).rounded() / 100) }
+            var o: [String: JSONValue] = [
+                "photo": .string(ws.id(for: photo.url)),
+                "current_angle": deg(photo.settings.crop?.angle ?? 0),
+                "segments": .array(report.segments.map {
+                    ["id": .number(Double($0.id)), "axis": .string($0.axis.rawValue), "angle": deg($0.angle),
+                     "length": .number(round4($0.length)), "from": point($0.from), "to": point($0.to)]
+                }),
+                "subjects": .array(subjects.map { id, m in
+                    ["id": .string(id), "kind": .string(m.kind.rawValue), "angle": deg(m.angle), "center": point(m.center)]
+                }),
+            ]
+            var notes: [String] = []
+            var chosen: [String: JSONValue] = [:]
+            if let ids = args["segments"]?.arrayValue?.compactMap(\.intValue), !ids.isEmpty {
+                let picked = report.segments.filter { ids.contains($0.id) }
+                let missing = ids.filter { id in !picked.contains { $0.id == id } }
+                if !missing.isEmpty { notes.append("見つからない番号: \(missing.map(String.init).joined(separator: ", "))(番号は呼ぶたびに同じ。前の結果の番号を使う)") }
+                if let c = TiltEstimator.combinedAngle(picked) {
+                    chosen["segments"] = ["angle": deg(c.angle), "spread": deg(c.spread), "count": .number(Double(picked.count))]
+                    if c.spread > 0.7 { notes.append("選んだ線の角度が ±\(String(format: "%.1f", c.spread))° ばらついている。遠近で斜めに見える線が混ざっていないか確かめる") }
+                }
+            }
+            if let ids = args["subjects"]?.arrayValue?.compactMap(\.stringValue), !ids.isEmpty {
+                let picked = subjects.filter { ids.contains($0.0) }.map(\.1)
+                if picked.count < ids.count { notes.append("見つからない人物の線がある") }
+                if !picked.isEmpty {
+                    let mean = picked.map(\.angle).reduce(0, +) / Double(picked.count)
+                    let spread = (picked.map { ($0.angle - mean) * ($0.angle - mean) }.reduce(0, +) / Double(picked.count)).squareRoot()
+                    chosen["subjects"] = ["angle": deg(mean), "spread": deg(spread), "count": .number(Double(picked.count))]
+                }
+            }
+            if !chosen.isEmpty { o["chosen"] = .object(chosen) }
+            if report.segments.isEmpty { notes.append("長い直線が見つからない(自然の風景など)。人物の線か、目で見て決める") }
+            if photo.lensCorrection != nil, photo.effectiveLensSettings(photo.settings)?.distortion == false {
+                notes.append("歪曲補正が切れているので、画面の端の直線は曲がって測りにくい(set_lens_correction で distortion をオンにすると正確になる)")
+            }
+            if !notes.isEmpty { o["notes"] = .array(notes.map { .string($0) }) }
+
+            var content: [ToolContent] = [.json(.object(o))]
+            if args["image"]?.boolValue ?? true {
+                let image = try ws.engine.pipeline.processFitting(photo, settings: TiltEstimator.measuringSettings(photo.settings),
+                                                                  longEdge: args["long_edge"]?.intValue ?? 768)
+                let marked = try PreviewOverlay.draw(on: image, frame: nil, marks: TiltEstimator.marks(report))
+                content.append(.image(data: try PreviewEncoder.jpeg(marked, quality: 0.75), mimeType: "image/jpeg"))
+            }
+            return warned(ToolResult(content), ws, [photo.url])
+        }
     }
 
     static func cropJSON(_ crop: CropSettings?) -> JSONValue {

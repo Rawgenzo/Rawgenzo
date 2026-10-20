@@ -21,7 +21,7 @@ final class RawgenzoToolsSchemaTests: XCTestCase {
         let ws = RawgenzoWorkspace(folder: FileManager.default.temporaryDirectory)
         let surface = RawgenzoTools.makeSurface(workspace: ws)
         XCTAssertEqual(surface.descriptors.map(\.name),
-                       ["get_app_state", "list_photos", "get_photo", "get_stats", "get_preview", "adjust", "set_crop", "list_looks", "set_look", "set_lens_correction", "set_hdr_output", "reset_settings", "solve_exposure", "undo", "recent_operations"])
+                       ["get_app_state", "list_photos", "get_photo", "get_stats", "get_preview", "adjust", "set_crop", "estimate_tilt", "list_looks", "set_look", "set_lens_correction", "set_hdr_output", "reset_settings", "solve_exposure", "undo", "recent_operations"])
         XCTAssertEqual(surface.descriptors.first { $0.name == "adjust" }?.effect, .modify)
     }
 
@@ -404,6 +404,22 @@ final class RawgenzoToolsSampleTests: XCTestCase {
         XCTAssertEqual(s, edited)
         let again = try json(surface.call("reset_settings", arguments: ["photos": [.string(id2)]], as: ai))
         XCTAssertNotNil(again["results"]?.arrayValue?.first?["notes"], "もともと初期値")
+    }
+
+    /// estimate_tilt: 番号付きの線と画像を返し、選んだ番号から角度を出す。読むだけで保存しない
+    func testEstimateTilt() throws {
+        let r = surface.call("estimate_tilt", arguments: ["photo": .string(id), "long_edge": 512], as: ai)
+        let o = try json(r)
+        XCTAssertTrue(r.content.contains { if case .image = $0 { return true } else { return false } }, "番号を描いた画像が付く")
+        let segments = try XCTUnwrap(o["segments"]?.arrayValue)
+        guard let first = segments.first, let angle = first["angle"]?.doubleValue else { throw XCTSkip("このサンプルに長い直線が無い") }
+        XCTAssertEqual(first["id"], 1)
+        XCTAssertLessThanOrEqual(abs(angle), TiltEstimator.searchRange)
+
+        let picked = try json(surface.call("estimate_tilt", arguments: ["photo": .string(id), "segments": [1, 99], "image": false], as: ai))
+        XCTAssertEqual(try XCTUnwrap(picked["chosen"]?["segments"]?["angle"]?.doubleValue), angle, accuracy: 0.01, "1 本だけならその線の角度")
+        XCTAssertTrue(picked["notes"]?.arrayValue?.contains { $0.stringValue?.contains("99") == true } == true, "\(picked)")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: sidecar.path), "読むだけ")
     }
 
     /// get_preview の region・show_crop_frame・guide

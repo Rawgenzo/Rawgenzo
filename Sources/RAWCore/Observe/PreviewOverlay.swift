@@ -1,5 +1,6 @@
 import CoreGraphics
 import CoreImage
+import CoreText
 import Foundation
 
 /// AI に見せる縮小画像に、切り抜き枠と構図ガイドを描き込む。
@@ -15,10 +16,32 @@ public enum PreviewOverlay {
         CGColor(srgbRed: 1.0, green: 0.45, blue: 0.75, alpha: 0.95),
     ]
 
+    /// 番号付きで描く線(傾きの推定の候補など)
+    public struct Mark: Sendable {
+        public enum Color: Sendable { case horizontal, vertical, subject }
+        public var label: String
+        public var from: CGPoint
+        public var to: CGPoint
+        public var color: Color
+        public init(label: String, from: CGPoint, to: CGPoint, color: Color) {
+            self.label = label; self.from = from; self.to = to; self.color = color
+        }
+    }
+
+    static func cgColor(_ c: Mark.Color) -> CGColor {
+        switch c {
+        case .horizontal: return CGColor(srgbRed: 0.3, green: 0.85, blue: 1.0, alpha: 1)
+        case .vertical: return CGColor(srgbRed: 1.0, green: 0.55, blue: 0.3, alpha: 1)
+        case .subject: return CGColor(srgbRed: 0.5, green: 1.0, blue: 0.4, alpha: 1)
+        }
+    }
+
     /// - frame: 切り抜き枠(nil なら描かない)。枠の外は暗くする
     /// - guides: 描くガイド。guideArea(既定は枠、枠が無ければ画像全体)の中に描く
+    /// - marks: 番号付きの線
     public static func draw(on image: CIImage, frame: CGRect?, guides: [CompositionGuide] = [],
-                            guideArea: CGRect? = nil, options: GuideOptions = GuideOptions()) throws -> CIImage {
+                            guideArea: CGRect? = nil, options: GuideOptions = GuideOptions(),
+                            marks: [Mark] = []) throws -> CIImage {
         let extent = image.extent.integral
         let w = Int(extent.width), h = Int(extent.height)
         guard w > 0, h > 0, let source = context.createCGImage(image, from: extent),
@@ -64,6 +87,47 @@ public enum PreviewOverlay {
                     ctx.restoreGState()
                 }
             }
+        }
+        // 番号付きの線: 線を描いてから、端に番号の札を置く(札は画像の中に収める)
+        let fontSize = max(11, CGFloat(max(w, h)) / 60)
+        let font = CTFontCreateWithName("Helvetica-Bold" as CFString, fontSize, nil)
+        var placed: [CGRect] = []
+        for m in marks {
+            let a = CGPoint(x: m.from.x * CGFloat(w), y: (1 - m.from.y) * CGFloat(h))
+            let b = CGPoint(x: m.to.x * CGFloat(w), y: (1 - m.to.y) * CGFloat(h))
+            for (color, extra) in [(CGColor(gray: 0, alpha: 0.6), line * 1.2), (cgColor(m.color), 0)] {
+                ctx.saveGState()
+                ctx.setStrokeColor(color); ctx.setLineWidth(line * 1.2 + extra); ctx.setLineCap(.round)
+                ctx.move(to: a); ctx.addLine(to: b); ctx.strokePath()
+                ctx.restoreGState()
+            }
+            let text = NSAttributedString(string: m.label, attributes: [
+                NSAttributedString.Key(kCTFontAttributeName as String): font,
+                NSAttributedString.Key(kCTForegroundColorAttributeName as String): CGColor(gray: 0, alpha: 1),
+            ])
+            let ctLine = CTLineCreateWithAttributedString(text)
+            // CTLineGetImageBounds は今の文字の位置からの範囲を返すので、0 にしてから測る
+            // (しないと、1 つ前の札の位置だけずれて、札と番号が離れた)
+            ctx.textPosition = .zero
+            let bounds = CTLineGetImageBounds(ctLine, ctx)
+            let pad = fontSize * 0.25
+            let size = CGSize(width: bounds.width + pad * 2, height: fontSize + pad)
+            // 線の左端(縦の線なら上端)の少し外に置く
+            let anchor = m.from.x <= m.to.x ? a : b
+            var box = CGRect(x: anchor.x - size.width / 2, y: anchor.y + line * 2, width: size.width, height: size.height)
+            box.origin.x = min(max(box.minX, 0), CGFloat(w) - box.width)
+            box.origin.y = min(max(box.minY, 0), CGFloat(h) - box.height)
+            // 先に置いた札と重なるなら、横にずらす(窓のブラインドのように線が密集すると、番号が隠れて選べなくなる)
+            for _ in 0..<8 where placed.contains(where: { $0.insetBy(dx: -1, dy: -1).intersects(box) }) {
+                box.origin.x += box.width + pad
+                if box.maxX > CGFloat(w) { box.origin.x = 0; box.origin.y = max(box.minY - box.height - pad, 0) }
+            }
+            placed.append(box)
+            ctx.setFillColor(cgColor(m.color))
+            ctx.addPath(CGPath(roundedRect: box, cornerWidth: pad, cornerHeight: pad, transform: nil))
+            ctx.fillPath()
+            ctx.textPosition = CGPoint(x: box.minX + pad - bounds.minX, y: box.minY + pad * 0.6 + fontSize * 0.15)
+            CTLineDraw(ctLine, ctx)
         }
         guard let out = ctx.makeImage() else { throw RAWError.renderFailed("枠やガイドを描けません") }
         return CIImage(cgImage: out)

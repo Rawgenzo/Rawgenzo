@@ -166,7 +166,17 @@ case "params":
     }
 
 case "tilt":
-    let urls = expand(arguments.filter { !$0.hasPrefix("--") })
+    // --preview <フォルダ>: 候補の線に番号を描いた JPEG を書き出す(AI に見せる画像と同じもの)
+    var tiltPreview: URL?
+    var tiltPaths: [String] = []
+    var ti = 0
+    while ti < arguments.count {
+        if arguments[ti] == "--preview", ti + 1 < arguments.count {
+            tiltPreview = URL(fileURLWithPath: (arguments[ti + 1] as NSString).expandingTildeInPath); ti += 2; continue
+        }
+        tiltPaths.append(arguments[ti]); ti += 1
+    }
+    let urls = expand(tiltPaths)
     if urls.isEmpty { fail("RAWファイルが見つかりません") }
     for url in urls {
         do {
@@ -174,13 +184,17 @@ case "tilt":
             let photo = try engine.open(url)
             let r = try TiltEstimator.estimate(photo, settings: photo.settings, pipeline: engine.pipeline)
             let ms = Int(Date().timeIntervalSince(start) * 1000)
-            print("■ \(url.lastPathComponent)  (\(ms)ms。値は set_crop の angle に入れると直る角度)")
-            for (name, axis) in [("水平の線", r.lines.horizontal), ("垂直の線", r.lines.vertical)] {
-                if let a = axis {
-                    print(String(format: "  %@: %+.2f°  そろい %.2f  ばらつき %.2f°  %d px", name, a.angle, a.support, a.spread, a.pixels))
-                } else {
-                    print("  \(name): 見つからない")
-                }
+            print("■ \(url.lastPathComponent)  (\(ms)ms。角度は set_crop の angle に入れると、その線が水平・垂直になる値)")
+            if r.segments.isEmpty { print("  直線: 見つからない") }
+            for g in r.segments {
+                print(String(format: "  %2d %@ %+.2f°  長さ %.2f  (%.2f, %.2f)→(%.2f, %.2f)", g.id, g.axis == .horizontal ? "水平" : "垂直",
+                             g.angle, g.length, g.from.x, g.from.y, g.to.x, g.to.y))
+            }
+            if let dir = tiltPreview {
+                let image = try engine.pipeline.processFitting(photo, settings: TiltEstimator.measuringSettings(photo.settings), longEdge: 1024)
+                let out = try PreviewOverlay.draw(on: image, frame: nil, marks: TiltEstimator.marks(r))
+                let file = dir.appendingPathComponent(url.deletingPathExtension().lastPathComponent + "_tilt.jpg")
+                try PreviewEncoder.jpeg(out).write(to: file)
             }
             if r.subjects.isEmpty { print("  人物: 見つからない") }
             for m in r.subjects {

@@ -3,135 +3,228 @@ import CoreImage
 import Foundation
 import Vision
 
-/// 写真の傾きを推定する。返す角度はどれも「CropSettings.angle に入れると直る値」(度。正 = 時計回りに回す)。
+/// 写真の傾きを推定するための手がかり(長い直線と、人物の目・肩の線)を見つける。
+/// 返す角度はどれも「CropSettings.angle に入れると、その線が水平(または垂直)になる値」(度。正 = 時計回りに回す)。
 ///
-/// 水平の基準は 1 つではない。2026-10-20 の試験では、同じ写真で棚の線を基準にすると −0.8°、
-/// 二人の並びや体の傾きを基準にすると +1.2° になり、オーナーは人物写真として +1.2° を選んだ。
-/// どちらが正しいかは写真の意図で決まるので、基準ごとの値を両方返し、選ぶのは AI と人に任せる。
+/// どの線を基準にするかは決めない。2026-10-20 の試験で分かったこと:
+/// - 水平の基準は 1 つではない。同じ写真で棚の線を基準にすると −0.8°、二人の並びや体の傾きを基準にすると +1.2° で、
+///   オーナーは人物写真として +1.2° を選んだ
+/// - 画素ごとのエッジの向きを数える最初の試作は、合成画像では ±0.15° で当てたが、本物の写真では雲・水面・葉や、
+///   奥へ伸びる手すり(遠近で斜めに見える線)に引っぱられ、水平と垂直の推定が最大 11° 食い違った
+/// そこで、長い直線を番号付きの候補として返し、本当に水平・垂直な線(建物の縁・柱・水平線)を選ぶのは
+/// 画像を見た AI に任せる。角度の精密な計算だけをここで行う。
 public enum TiltEstimator {
-    /// 線を基準にした推定。水平に近い線と垂直に近い線を別々に数える
-    /// (カメラを上下に向けて撮ると縦の線が平行でなくなるので、食い違いを見分けられるように)
-    public struct LineEstimate: Equatable, Sendable {
-        public struct Axis: Equatable, Sendable {
-            /// 直すための角度
-            public var angle: Double
-            /// 推定に使ったエッジのうち、推定値の ±0.75° に入る重みの割合(0...1。高いほど 1 本の向きにそろっている)
-            public var support: Double
-            /// 推定値のまわり(±2°)のばらつき(度)
-            public var spread: Double
-            /// 推定に使ったエッジの量(ピクセル数)
-            public var pixels: Int
-        }
-        public var horizontal: Axis?
-        public var vertical: Axis?
+    /// 見つけた直線 1 本
+    public struct Segment: Equatable, Sendable {
+        public enum Axis: String, Sendable { case horizontal, vertical }
+        /// 長い順の番号(1 から)
+        public var id: Int
+        public var axis: Axis
+        /// この線が水平(垂直)になる傾き補正の角度
+        public var angle: Double
+        /// 長さ(画像の長辺に対する比率)
+        public var length: Double
+        /// 端の点(画像に対する比率、左上原点)
+        public var from: CGPoint
+        public var to: CGPoint
     }
 
-    /// 人物を基準にした推定。目を結ぶ線・肩を結ぶ線の 1 本ずつ
+    /// 人物の目を結ぶ線・肩を結ぶ線の 1 本
     public struct SubjectMark: Equatable, Sendable {
         public enum Kind: String, Sendable { case eyes, shoulders }
         public var kind: Kind
-        /// 直すための角度(その線が水平になる角度)
+        /// その線が水平になる傾き補正の角度
         public var angle: Double
-        /// 線の中点(画像に対する比率、左上原点)
-        public var center: CGPoint
+        /// 線の端(画像に対する比率、左上原点)
+        public var from: CGPoint
+        public var to: CGPoint
+        public var center: CGPoint { CGPoint(x: (from.x + to.x) / 2, y: (from.y + to.y) / 2) }
     }
 
-    /// 探す範囲(度)。これより大きく傾いた写真は、意図した傾きとみなして数えない
+    /// 探す範囲(度)。水平・垂直からこれより大きく傾いた線は、手がかりにしない
     public static let searchRange = 10.0
+    /// 線分として数える最短の長さ(画像の長辺に対する比率)
+    public static let minLength = 0.04
+    /// 返す線分の数の上限(水平・垂直それぞれ。片方の向きだけで埋まらないように)
+    public static let maxSegmentsPerAxis = 10
 
-    // MARK: - 線
+    /// 複数の線分の角度を、長さで重みを付けて平均する(AI が選んだ線から角度を出す)
+    public static func combinedAngle(_ segments: [Segment]) -> (angle: Double, spread: Double)? {
+        let total = segments.map(\.length).reduce(0, +)
+        guard total > 0 else { return nil }
+        let mean = segments.map { $0.angle * $0.length }.reduce(0, +) / total
+        let variance = segments.map { $0.length * ($0.angle - mean) * ($0.angle - mean) }.reduce(0, +) / total
+        return (mean, variance.squareRoot())
+    }
 
-    public static func lines(in image: CIImage, context: CIContext = CIContext()) -> LineEstimate {
-        guard let gray = Gray(image, context: context) else { return LineEstimate() }
+    // MARK: - 直線
+
+    /// 長い直線を見つける。水平・垂直から ±searchRange 以内のものだけを、向きごとに長い順で maxSegmentsPerAxis 本まで
+    public static func segments(in image: CIImage, context: CIContext = CIContext()) -> [Segment] {
+        guard let gray = Gray(image, context: context) else { return [] }
         let (w, h) = (gray.width, gray.height)
         let n = w * h
-        // Sobel(y は上向きを正にする。画素の行は上から下なので符号を反転)
         var jxx = [Float](repeating: 0, count: n), jxy = jxx, jyy = jxx
         for y in 1..<(h - 1) {
             for x in 1..<(w - 1) {
                 let p = { (dx: Int, dy: Int) in gray.v[(y + dy) * w + x + dx] }
                 let gx = (p(1, -1) + 2 * p(1, 0) + p(1, 1)) - (p(-1, -1) + 2 * p(-1, 0) + p(-1, 1))
-                let gyDown = (p(-1, 1) + 2 * p(0, 1) + p(1, 1)) - (p(-1, -1) + 2 * p(0, -1) + p(1, -1))
-                let gy = -gyDown
+                // 画素の行は上から下なので、上向きを正にするため符号を反転
+                let gy = -((p(-1, 1) + 2 * p(0, 1) + p(1, 1)) - (p(-1, -1) + 2 * p(0, -1) + p(1, -1)))
                 let i = y * w + x
                 jxx[i] = gx * gx; jxy[i] = gx * gy; jyy[i] = gy * gy
             }
         }
-        // 構造テンソル(5×5 で平均)。1 画素ごとの勾配の向きより、線の向きを精度よく出せる
-        jxx = boxBlur(jxx, w, h, radius: 2); jxy = boxBlur(jxy, w, h, radius: 2); jyy = boxBlur(jyy, w, h, radius: 2)
+        // 構造テンソルを 3×3 で平均(線の向きを安定させる。広げすぎると近くの線がにじんで混ざる)
+        jxx = boxBlur(jxx, w, h, radius: 1); jxy = boxBlur(jxy, w, h, radius: 1); jyy = boxBlur(jyy, w, h, radius: 1)
 
-        // 強いエッジ(上位 15%)だけを使う
-        let border = 4
+        // 画素ごとの線の向き(上向き y の数学の向き。反時計回りが正。−90...90)と強さ
+        let border = 3
+        var orientation = [Float](repeating: 0, count: n)
+        var strength = [Float](repeating: 0, count: n)
         var energies: [Float] = []
-        energies.reserveCapacity(n / 4)
-        for y in border..<(h - border) { for x in border..<(w - border) { energies.append(jxx[y * w + x] + jyy[y * w + x]) } }
-        guard !energies.isEmpty else { return LineEstimate() }
-        energies.sort()
-        let threshold = max(energies[Int(Double(energies.count) * 0.85)], 1e-4)
-
-        let bins = Int(searchRange * 2 / binWidth)
-        var histH = [Double](repeating: 0, count: bins), histV = histH
-        var countH = 0, countV = 0
-        // 2 段目(投影で詰める)に使うエッジの点。座標は上向き y
-        var pointsH: [(x: Double, y: Double, w: Double)] = [], pointsV = pointsH
+        energies.reserveCapacity(n / 2)
         for y in border..<(h - border) {
             for x in border..<(w - border) {
                 let i = y * w + x
                 let a = Double(jxx[i]), b = Double(jxy[i]), c = Double(jyy[i])
                 let energy = a + c
-                guard energy >= Double(threshold) else { continue }
+                guard energy > 1e-6 else { continue }
                 let coherence = ((a - c) * (a - c) + 4 * b * b).squareRoot() / energy
-                guard coherence > 0.6 else { continue }
-                // 勾配の主な向き → 線の向き(勾配に直角)。上向き y の数学の向き(反時計回りが正)
-                let gradient = 0.5 * atan2(2 * b, a - c) * 180 / .pi
-                let line = normalize(gradient + 90)
-                let weight = coherence * coherence * energy.squareRoot()
-                let point = (x: Double(x), y: Double(h - 1 - y), w: weight)
-                if abs(line) < searchRange {
-                    add(line, weight, to: &histH); countH += 1; pointsH.append(point)
-                } else {
-                    let v = normalize(line - 90)
-                    if abs(v) < searchRange { add(v, weight, to: &histV); countV += 1; pointsV.append(point) }
+                guard coherence > 0.5 else { continue }
+                orientation[i] = Float(normalize(0.5 * atan2(2 * b, a - c) * 180 / .pi + 90))
+                strength[i] = Float(energy)
+                energies.append(Float(energy))
+            }
+        }
+        guard energies.count > 100 else { return [] }
+        energies.sort()
+        let threshold = max(energies[Int(Double(energies.count) * 0.7)], 0.02)
+
+        // 強い画素から順に、向きのそろった隣の画素をつなげて線分の候補にする(LSD の領域成長を簡単にしたもの)
+        var seeds: [Int] = []
+        for i in 0..<n where strength[i] >= threshold { seeds.append(i) }
+        seeds.sort { strength[$0] > strength[$1] }
+        var used = [Bool](repeating: false, count: n)
+        let tolerance = 6.0
+        let longEdge = Double(max(w, h))
+        var regions: [[Int]] = []
+        for seed in seeds where !used[seed] {
+            used[seed] = true
+            var region = [seed]
+            var queue = [seed], head = 0
+            // 領域の向きは倍角のベクトルの和で持つ(180° 回ると同じ向き)
+            var sx = cos(2 * Double(orientation[seed]) * .pi / 180), sy = sin(2 * Double(orientation[seed]) * .pi / 180)
+            while head < queue.count {
+                let i = queue[head]; head += 1
+                let x = i % w, y = i / w
+                let mean = 0.5 * atan2(sy, sx) * 180 / .pi
+                for dy in -1...1 {
+                    for dx in -1...1 where dx != 0 || dy != 0 {
+                        let nx = x + dx, ny = y + dy
+                        guard nx >= border, ny >= border, nx < w - border, ny < h - border else { continue }
+                        let j = ny * w + nx
+                        guard !used[j], strength[j] >= threshold * 0.5 else { continue }
+                        guard abs(normalize(Double(orientation[j]) - mean)) < tolerance else { continue }
+                        used[j] = true
+                        region.append(j); queue.append(j)
+                        sx += cos(2 * Double(orientation[j]) * .pi / 180); sy += sin(2 * Double(orientation[j]) * .pi / 180)
+                    }
+                }
+            }
+            // 交わる線のところで向きが変わって途切れるので、ここでは短いものも残し、後でつなぐ
+            if Double(region.count) >= longEdge * minLength / 2 { regions.append(region) }
+        }
+        typealias Fitted = (axis: Segment.Axis, angle: Double, length: Double, from: CGPoint, to: CGPoint)
+        var pieces: [(fit: Fitted, region: [Int])] = regions.compactMap { r in
+            fit(r, width: w, height: h, longEdge: longEdge, minLength: minLength / 2).map { ($0, r) }
+        }
+        // 同じ直線のかけら(向きがほぼ同じで、同じ線の上にあり、間が近い)をつないで当てはめ直す
+        var merged = true
+        while merged {
+            merged = false
+            outer: for i in pieces.indices {
+                for j in pieces.indices where j > i && sameLine(pieces[i].fit, pieces[j].fit, width: w, height: h) {
+                    let union = pieces[i].region + pieces[j].region
+                    if let f = fit(union, width: w, height: h, longEdge: longEdge, minLength: minLength / 2) {
+                        pieces[i] = (f, union)
+                        pieces.remove(at: j)
+                        merged = true
+                        break outer
+                    }
                 }
             }
         }
-        // 1 段目: 向きのヒストグラムの山。画素の格子に沿った階段状のエッジに引っぱられ、大きい角度ほど 0 寄りに出る
-        // (3° を 2.78° と出した)。2 段目: 山のまわりで、エッジの点を投影したときに線がいちばん鋭くそろう角度を探す
-        var horizontal = peak(histH, pixels: countH), vertical = peak(histV, pixels: countV)
-        if let a = horizontal { horizontal?.angle = refine(pointsH, around: a.angle, vertical: false) }
-        if let a = vertical { vertical?.angle = refine(pointsV, around: a.angle, vertical: true) }
-        return LineEstimate(horizontal: horizontal, vertical: vertical)
+        // 向きごとに長い順。同じ長さなら位置で並べて、呼ぶたびに番号が変わらないようにする
+        func order(_ a: Fitted, _ b: Fitted) -> Bool { (a.length, a.from.y, a.from.x) > (b.length, b.from.y, b.from.x) }
+        let long = pieces.map(\.fit).filter { $0.length >= minLength }
+        let kept = (long.filter { $0.axis == .horizontal }.sorted(by: order).prefix(maxSegmentsPerAxis)
+            + long.filter { $0.axis == .vertical }.sorted(by: order).prefix(maxSegmentsPerAxis)).sorted(by: order)
+        return kept.enumerated().map { k, s in
+            Segment(id: k + 1, axis: s.axis, angle: s.angle, length: s.length, from: s.from, to: s.to)
+        }
     }
 
-    /// 角度 deg の線に直角な向きへ点を投影し、1 ピクセル幅のヒストグラムの鋭さ(二乗和)がいちばん大きい角度を探す。
-    /// 線が本当にその角度なら、同じ線の点が同じ区間に集まって鋭くなる(文書の傾き補正で使われるやり方)
-    static func refine(_ points: [(x: Double, y: Double, w: Double)], around start: Double, vertical: Bool) -> Double {
-        guard points.count >= 200 else { return start }
-        func score(_ deg: Double) -> Double {
-            let t = deg * .pi / 180, c = cos(t), s = sin(t)
-            var hist: [Int: Double] = [:]
-            hist.reserveCapacity(points.count / 4)
-            for p in points {
-                // 水平に近い線: 法線は (−sin, cos)。垂直に近い線: 法線は (cos, sin)
-                let u = vertical ? p.x * c + p.y * s : p.y * c - p.x * s
-                hist[Int(u.rounded(.down)), default: 0] += p.w
-            }
-            return hist.values.reduce(0) { $0 + $1 * $1 }
-        }
-        let step = 0.02, span = 1.0
-        let candidates = stride(from: start - span, through: start + span, by: step).map { $0 }
-        let scores = candidates.map(score)
-        guard let i = scores.indices.max(by: { scores[$0] < scores[$1] }) else { return start }
-        var best = candidates[i]
-        if i > 0, i < scores.count - 1 {
-            let (l, c, r) = (scores[i - 1], scores[i], scores[i + 1])
-            let denom = l - 2 * c + r
-            if denom != 0 { best += 0.5 * (l - r) / denom * step }
-        }
-        return best
+    /// 2 本が同じ直線のかけらか: 向きが 1° 以内、互いの端が相手の直線から 1.5 ピクセル以内、間が画像の長辺の 5% 以内
+    static func sameLine(_ a: (axis: Segment.Axis, angle: Double, length: Double, from: CGPoint, to: CGPoint),
+                         _ b: (axis: Segment.Axis, angle: Double, length: Double, from: CGPoint, to: CGPoint),
+                         width w: Int, height h: Int) -> Bool {
+        guard a.axis == b.axis, abs(a.angle - b.angle) < 1 else { return false }
+        func px(_ p: CGPoint) -> (Double, Double) { (Double(p.x) * Double(w), Double(p.y) * Double(h)) }
+        let (a0, a1, b0, b1) = (px(a.from), px(a.to), px(b.from), px(b.to))
+        let len = hypot(a1.0 - a0.0, a1.1 - a0.1)
+        guard len > 0 else { return false }
+        let (ux, uy) = ((a1.0 - a0.0) / len, (a1.1 - a0.1) / len)
+        func distance(_ p: (Double, Double)) -> Double { abs(-(p.0 - a0.0) * uy + (p.1 - a0.1) * ux) }
+        guard distance(b0) < 1.5, distance(b1) < 1.5 else { return false }
+        // 方向に沿った位置で、間のすき間を測る
+        func t(_ p: (Double, Double)) -> Double { (p.0 - a0.0) * ux + (p.1 - a0.1) * uy }
+        let (bl, bh) = (min(t(b0), t(b1)), max(t(b0), t(b1)))
+        let gap = max(0, max(bl - len, -bh))
+        return gap < 0.05 * Double(max(w, h))
     }
 
-    static let binWidth = 0.05
+    /// 画素の集まりに直線を当てはめる(主成分分析)。細長くないもの・短いもの・水平垂直から遠いものは nil
+    static func fit(_ region: [Int], width w: Int, height h: Int, longEdge: Double, minLength: Double)
+        -> (axis: Segment.Axis, angle: Double, length: Double, from: CGPoint, to: CGPoint)? {
+        var mx = 0.0, my = 0.0
+        for i in region { mx += Double(i % w); my += Double(h - 1 - i / w) }
+        let count = Double(region.count)
+        mx /= count; my /= count
+        var cxx = 0.0, cxy = 0.0, cyy = 0.0
+        for i in region {
+            let dx = Double(i % w) - mx, dy = Double(h - 1 - i / w) - my
+            cxx += dx * dx; cxy += dx * dy; cyy += dy * dy
+        }
+        let theta = 0.5 * atan2(2 * cxy, cxx - cyy)   // 主な向き(上向き y。反時計回りが正)
+        let (ux, uy) = (cos(theta), sin(theta))
+        var lo = Double.infinity, hi = -Double.infinity, across = 0.0
+        for i in region {
+            let dx = Double(i % w) - mx, dy = Double(h - 1 - i / w) - my
+            let t = dx * ux + dy * uy
+            lo = min(lo, t); hi = max(hi, t)
+            let d = -dx * uy + dy * ux
+            across += d * d
+        }
+        let length = hi - lo
+        let thickness = (across / count).squareRoot()
+        guard length >= longEdge * minLength, length > 8 * max(thickness, 0.5) else { return nil }
+        let deg = normalize(theta * 180 / .pi)
+        let axis: Segment.Axis
+        let angle: Double
+        if abs(deg) < searchRange {
+            // 右上がりの線(反時計回りにずれている)は、時計回りに回すと水平になる
+            axis = .horizontal; angle = deg
+        } else if abs(normalize(deg - 90)) < searchRange {
+            axis = .vertical; angle = normalize(deg - 90)
+        } else {
+            return nil
+        }
+        func point(_ t: Double) -> CGPoint {
+            CGPoint(x: (mx + t * ux) / Double(w), y: 1 - (my + t * uy) / Double(h))
+        }
+        return (axis, angle, length / longEdge, point(lo), point(hi))
+    }
 
     /// (−90, 90] に収める
     static func normalize(_ deg: Double) -> Double {
@@ -139,50 +232,6 @@ public enum TiltEstimator {
         if d > 90 { d -= 180 }
         if d <= -90 { d += 180 }
         return d
-    }
-
-    static func add(_ deg: Double, _ weight: Double, to hist: inout [Double]) {
-        let i = Int((deg + searchRange) / binWidth)
-        if hist.indices.contains(i) { hist[i] += weight }
-    }
-
-    /// ヒストグラムのいちばん高い山。線の向きの「反時計回りのずれ」がそのまま直す角度(時計回りに回す量)になる
-    static func peak(_ hist: [Double], pixels: Int) -> LineEstimate.Axis? {
-        let total = hist.reduce(0, +)
-        guard pixels >= 200, total > 0 else { return nil }
-        // ガウスでならす(σ 0.25°)
-        let sigma = 0.25 / binWidth, r = Int(sigma * 3)
-        let kernel = (-r...r).map { exp(-Double($0 * $0) / (2 * sigma * sigma)) }
-        var smooth = [Double](repeating: 0, count: hist.count)
-        for i in hist.indices {
-            var s = 0.0
-            for (k, wgt) in kernel.enumerated() {
-                let j = i + k - r
-                if hist.indices.contains(j) { s += hist[j] * wgt }
-            }
-            smooth[i] = s
-        }
-        guard let top = smooth.indices.max(by: { smooth[$0] < smooth[$1] }) else { return nil }
-        // 放物線で山の頂を細かく求める
-        var offset = 0.0
-        if top > 0, top < smooth.count - 1 {
-            let (l, c, rr) = (smooth[top - 1], smooth[top], smooth[top + 1])
-            let denom = l - 2 * c + rr
-            if denom != 0 { offset = 0.5 * (l - rr) / denom }
-        }
-        let deg = (Double(top) + 0.5 + offset) * binWidth - searchRange
-        func weight(within d: Double) -> (sum: Double, sq: Double) {
-            var sum = 0.0, sq = 0.0
-            for i in hist.indices {
-                let x = (Double(i) + 0.5) * binWidth - searchRange
-                if abs(x - deg) <= d { sum += hist[i]; sq += hist[i] * (x - deg) * (x - deg) }
-            }
-            return (sum, sq)
-        }
-        let near = weight(within: 0.75).sum
-        let around = weight(within: 2)
-        return LineEstimate.Axis(angle: deg, support: near / total,
-                                 spread: around.sum > 0 ? (around.sq / around.sum).squareRoot() : 0, pixels: pixels)
     }
 
     static func boxBlur(_ src: [Float], _ w: Int, _ h: Int, radius r: Int) -> [Float] {
@@ -259,7 +308,8 @@ public enum TiltEstimator {
             let b = CGPoint(x: r.location.x * size.width, y: r.location.y * size.height)
             if let m = mark(.shoulders, a, b, size) { marks.append(m) }
         }
-        return marks
+        // 左から順に並べる(呼ぶたびに番号が変わらないように)
+        return marks.sorted { ($0.center.x, $0.kind.rawValue) < ($1.center.x, $1.kind.rawValue) }
     }
 
     /// 2 点(Vision の座標: 左下原点のピクセル)を結ぶ線が水平になる角度
@@ -269,40 +319,54 @@ public enum TiltEstimator {
         guard dx * dx + dy * dy > 4 else { return nil }   // 近すぎる点は向きが定まらない
         let deg = atan2(dy, dx) * 180 / .pi
         guard abs(deg) < 30 else { return nil }   // 寝ている人など、水平の手がかりにならないもの
-        let mid = CGPoint(x: (a.x + b.x) / 2 / size.width, y: 1 - (a.y + b.y) / 2 / size.height)
-        return SubjectMark(kind: kind, angle: deg, center: mid)
+        func normalized(_ p: CGPoint) -> CGPoint { CGPoint(x: p.x / size.width, y: 1 - p.y / size.height) }
+        return SubjectMark(kind: kind, angle: deg, from: normalized(a), to: normalized(b))
     }
 }
 
 extension TiltEstimator {
-    /// 写真 1 枚の推定結果
+    /// 写真 1 枚の手がかり
     public struct Report: Sendable {
-        public var lines: LineEstimate
+        public var segments: [Segment]
         public var subjects: [SubjectMark]
-        /// 測った画像の大きさ(線・人物)
-        public var lineImageSize: CGSize
-        public var subjectImageSize: CGSize
     }
 
     /// 線は長辺 1024、人物は長辺 1600(顔が小さいと目の位置が取れないため)で測る。
     /// 測るのは、今の設定(レンズ補正を含む)で、切り抜きと傾き補正を外した画像。返す角度は傾き 0 からの値
-    public static func estimate(_ photo: Photo, settings: DevelopSettings, pipeline: DevelopPipeline,
-                                lines measureLines: Bool = true, subjects measureSubjects: Bool = true) throws -> Report {
+    public static func estimate(_ photo: Photo, settings: DevelopSettings, pipeline: DevelopPipeline) throws -> Report {
+        let context = CIContext(options: [.cacheIntermediates: false])
+        let s = measuringSettings(settings)
+        let lineImage = try pipeline.processFitting(photo, settings: s, longEdge: 1024)
+        let subjectImage = try pipeline.processFitting(photo, settings: s, longEdge: 1600)
+        return Report(segments: segments(in: lineImage, context: context),
+                      subjects: try subjects(in: subjectImage, context: context))
+    }
+
+    /// 測るときの設定: 切り抜き・傾き補正・ルックを外す(ルックの周辺減光などが手がかりを変えないように)
+    public static func measuringSettings(_ settings: DevelopSettings) -> DevelopSettings {
         var s = settings
         s.crop = nil
-        s.look = nil   // 周辺減光などのルックが線や顔の手がかりを変えないように
-        let context = CIContext(options: [.cacheIntermediates: false])
-        var report = Report(lines: LineEstimate(), subjects: [], lineImageSize: .zero, subjectImageSize: .zero)
-        if measureLines {
-            let image = try pipeline.processFitting(photo, settings: s, longEdge: 1024)
-            report.lines = lines(in: image, context: context)
-            report.lineImageSize = image.extent.size
+        s.look = nil
+        return s
+    }
+}
+
+extension TiltEstimator {
+    /// 画像に描く番号付きの線(直線は番号、人物は E1・S1 のように目・肩の頭文字と番号)
+    public static func marks(_ r: Report) -> [PreviewOverlay.Mark] {
+        r.segments.map { PreviewOverlay.Mark(label: "\($0.id)", from: $0.from, to: $0.to,
+                                             color: $0.axis == .horizontal ? .horizontal : .vertical) }
+            + subjectIDs(r.subjects).map { id, m in PreviewOverlay.Mark(label: id, from: m.from, to: m.to, color: .subject) }
+    }
+
+    /// 人物の線の番号(目は E1, E2…、肩は S1, S2…。左から順)
+    public static func subjectIDs(_ marks: [SubjectMark]) -> [(String, SubjectMark)] {
+        var eyes = 0, shoulders = 0
+        return marks.map { m in
+            switch m.kind {
+            case .eyes: eyes += 1; return ("E\(eyes)", m)
+            case .shoulders: shoulders += 1; return ("S\(shoulders)", m)
+            }
         }
-        if measureSubjects {
-            let image = try pipeline.processFitting(photo, settings: s, longEdge: 1600)
-            report.subjects = try subjects(in: image, context: context)
-            report.subjectImageSize = image.extent.size
-        }
-        return report
     }
 }

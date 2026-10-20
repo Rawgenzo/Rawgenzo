@@ -33,6 +33,7 @@ Rawgenzo アプリの画面でできることのうち、どれを AI の道具(
 | 一部を拡大して見る | `get_preview` の `region`(等倍まで) |
 | クロップ枠・構図ガイドを重ねて見る | `get_preview` の `show_crop_frame`・`guide`(枠の中にガイドを描く) |
 | (GUI には無い) 取り消し・操作の履歴 | `undo`・`recent_operations`(操作面の汎用の道具) |
+| (GUI には無い) 傾きの手がかり | `estimate_tilt`(番号付きの直線と人物の目・肩の線。AI が基準の線を選ぶと角度を返す) |
 
 ## まだ道具にしていないもの
 

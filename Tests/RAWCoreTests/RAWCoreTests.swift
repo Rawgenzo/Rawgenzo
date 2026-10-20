@@ -1454,28 +1454,56 @@ final class TiltEstimatorTests: XCTestCase {
         return out.cropped(to: e.insetBy(dx: e.width * 0.15, dy: e.height * 0.15))
     }
 
+    /// 長い線(格子)の角度から、傾けた量を打ち消す角度が出る
+    private func estimate(_ image: CIImage) -> (h: Double?, v: Double?, segments: [TiltEstimator.Segment]) {
+        let segs = TiltEstimator.segments(in: image)
+        let long = segs.filter { $0.length > 0.5 }   // 格子の線は交点で途切れても、つなげば画像の幅いっぱいになる
+        return (TiltEstimator.combinedAngle(long.filter { $0.axis == .horizontal })?.angle,
+                TiltEstimator.combinedAngle(long.filter { $0.axis == .vertical })?.angle, segs)
+    }
+
     func testRecoversKnownRotation() {
         for a in [-3.0, -1.2, 0, 0.8, 2.5] {
-            let est = TiltEstimator.lines(in: rotated(grid(), a))
-            let h = try? XCTUnwrap(est.horizontal), v = try? XCTUnwrap(est.vertical)
-            XCTAssertEqual(h?.angle ?? .nan, -a, accuracy: 0.15, "水平の線 \(a)")
-            XCTAssertEqual(v?.angle ?? .nan, -a, accuracy: 0.15, "垂直の線 \(a)")
-            XCTAssertGreaterThan(h?.support ?? 0, 0.3)
+            let e = estimate(rotated(grid(), a))
+            XCTAssertEqual(e.h ?? .nan, -a, accuracy: 0.15, "水平の線 \(a)")
+            XCTAssertEqual(e.v ?? .nan, -a, accuracy: 0.15, "垂直の線 \(a)")
+            for s in e.segments where s.length > 0.5 {
+                XCTAssertEqual(s.angle, -a, accuracy: 0.3, "1 本ずつでも近い \(s)")
+            }
         }
     }
 
-    /// 直す角度を当てると、推定がほぼ 0 になる(CropSettings.angle の向きと合っている)
+    /// 番号は長い順で、呼ぶたびに同じ(AI が前の結果の番号を渡すため)
+    func testSegmentIDsAreStable() {
+        let image = rotated(grid(), 1.5)
+        let a = TiltEstimator.segments(in: image), b = TiltEstimator.segments(in: image)
+        XCTAssertEqual(a, b)
+        XCTAssertEqual(a.map(\.id), Array(1...a.count))
+        XCTAssertEqual(a.map(\.length), a.map(\.length).sorted(by: >))
+        XCTAssertLessThanOrEqual(a.count, TiltEstimator.maxSegmentsPerAxis * 2)
+        XCTAssertTrue(a.contains { $0.axis == .vertical } && a.contains { $0.axis == .horizontal }, "両方の向きが入る")
+    }
+
+    /// 直す角度を当てると、ほぼ水平になる(CropSettings.angle の向きと合っている)
     func testApplyingTheEstimateLevelsTheImage() {
         let tilted = rotated(grid(), 2)
-        let fix = TiltEstimator.lines(in: tilted).horizontal!.angle
-        let fixed = rotated(tilted, fix)
-        XCTAssertEqual(TiltEstimator.lines(in: fixed).horizontal!.angle, 0, accuracy: 0.15)
+        let fix = estimate(tilted).h!
+        XCTAssertEqual(estimate(rotated(tilted, fix)).h!, 0, accuracy: 0.15)
     }
 
     func testNoLinesGivesNoEstimate() {
         let flat = CIImage(color: CIColor(red: 0.5, green: 0.5, blue: 0.5)).cropped(to: CGRect(x: 0, y: 0, width: 400, height: 300))
-        let est = TiltEstimator.lines(in: flat)
-        XCTAssertNil(est.horizontal); XCTAssertNil(est.vertical)
+        XCTAssertTrue(TiltEstimator.segments(in: flat).isEmpty)
+    }
+
+    func testCombinedAngleWeightsByLength() {
+        func seg(_ angle: Double, _ length: Double) -> TiltEstimator.Segment {
+            TiltEstimator.Segment(id: 1, axis: .horizontal, angle: angle, length: length, from: .zero, to: .zero)
+        }
+        let c = TiltEstimator.combinedAngle([seg(1, 0.3), seg(-1, 0.1)])!
+        XCTAssertEqual(c.angle, 0.5, accuracy: 1e-12)
+        XCTAssertGreaterThan(c.spread, 0)
+        XCTAssertNil(TiltEstimator.combinedAngle([]))
     }
 
     /// 人物の線: Vision の座標(左下原点)で右上がりの線は、時計回りに回すと水平になる(正の角度)
@@ -1484,7 +1512,7 @@ final class TiltEstimatorTests: XCTestCase {
         let m = TiltEstimator.mark(.eyes, CGPoint(x: 400, y: 500), CGPoint(x: 500, y: 510), size)!
         XCTAssertEqual(m.angle, atan2(10, 100) * 180 / .pi, accuracy: 1e-9)
         XCTAssertGreaterThan(m.angle, 0)
-        XCTAssertEqual(m.center.y, 1 - 505.0 / 800, accuracy: 1e-9, "中点は左上原点の比率")
+        XCTAssertEqual(Double(m.center.y), 1 - 505.0 / 800, accuracy: 1e-9, "中点は左上原点の比率")
         // 左右の順は問わない
         XCTAssertEqual(TiltEstimator.mark(.eyes, CGPoint(x: 500, y: 510), CGPoint(x: 400, y: 500), size)!.angle, m.angle, accuracy: 1e-9)
         XCTAssertNil(TiltEstimator.mark(.eyes, CGPoint(x: 400, y: 500), CGPoint(x: 410, y: 560), size), "縦に近い線は手がかりにしない")
