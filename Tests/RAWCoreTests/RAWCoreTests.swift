@@ -1421,3 +1421,72 @@ final class PreviewOverlayTests: XCTestCase {
     }
 }
 
+
+/// 傾きの推定。CropStage で既知の角度だけ回した画像から、それを打ち消す角度が返るか(向きの取り違えを防ぐ)
+final class TiltEstimatorTests: XCTestCase {
+    /// 白地に黒い格子と、向きのばらばらな短い線(本物の写真の雑音の代わり)
+    private func grid(width: Int = 900, height: Int = 600) -> CIImage {
+        let ctx = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+                            space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        ctx.setFillColor(CGColor(gray: 1, alpha: 1)); ctx.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        ctx.setStrokeColor(CGColor(gray: 0, alpha: 1)); ctx.setLineWidth(3)
+        for x in stride(from: 60, to: width, by: 120) { ctx.move(to: CGPoint(x: x, y: 0)); ctx.addLine(to: CGPoint(x: x, y: height)) }
+        for y in stride(from: 50, to: height, by: 100) { ctx.move(to: CGPoint(x: 0, y: y)); ctx.addLine(to: CGPoint(x: width, y: y)) }
+        ctx.strokePath()
+        var rng = SystemRandomNumberGenerator()
+        ctx.setLineWidth(2)
+        for _ in 0..<40 {
+            let p = CGPoint(x: Double.random(in: 0...Double(width), using: &rng), y: Double.random(in: 0...Double(height), using: &rng))
+            let a = Double.random(in: 0..<(2 * .pi), using: &rng)
+            ctx.move(to: p); ctx.addLine(to: CGPoint(x: p.x + 30 * cos(a), y: p.y + 30 * sin(a)))
+        }
+        ctx.strokePath()
+        return CIImage(cgImage: ctx.makeImage()!)
+    }
+
+    /// 傾き a で回した(写真が a だけ時計回りに傾いた)画像 → 直す角度は −a
+    private func rotated(_ image: CIImage, _ a: Double) -> CIImage {
+        var s = DevelopSettings()
+        s.crop = CropSettings(angle: a)
+        // 回した四隅の透明な所を避けて中央を使う
+        let out = CropStage().apply(image, settings: s, options: RenderOptions(cropMode: .rotateOnly))
+        let e = image.extent
+        return out.cropped(to: e.insetBy(dx: e.width * 0.15, dy: e.height * 0.15))
+    }
+
+    func testRecoversKnownRotation() {
+        for a in [-3.0, -1.2, 0, 0.8, 2.5] {
+            let est = TiltEstimator.lines(in: rotated(grid(), a))
+            let h = try? XCTUnwrap(est.horizontal), v = try? XCTUnwrap(est.vertical)
+            XCTAssertEqual(h?.angle ?? .nan, -a, accuracy: 0.15, "水平の線 \(a)")
+            XCTAssertEqual(v?.angle ?? .nan, -a, accuracy: 0.15, "垂直の線 \(a)")
+            XCTAssertGreaterThan(h?.support ?? 0, 0.3)
+        }
+    }
+
+    /// 直す角度を当てると、推定がほぼ 0 になる(CropSettings.angle の向きと合っている)
+    func testApplyingTheEstimateLevelsTheImage() {
+        let tilted = rotated(grid(), 2)
+        let fix = TiltEstimator.lines(in: tilted).horizontal!.angle
+        let fixed = rotated(tilted, fix)
+        XCTAssertEqual(TiltEstimator.lines(in: fixed).horizontal!.angle, 0, accuracy: 0.15)
+    }
+
+    func testNoLinesGivesNoEstimate() {
+        let flat = CIImage(color: CIColor(red: 0.5, green: 0.5, blue: 0.5)).cropped(to: CGRect(x: 0, y: 0, width: 400, height: 300))
+        let est = TiltEstimator.lines(in: flat)
+        XCTAssertNil(est.horizontal); XCTAssertNil(est.vertical)
+    }
+
+    /// 人物の線: Vision の座標(左下原点)で右上がりの線は、時計回りに回すと水平になる(正の角度)
+    func testSubjectMarkSign() {
+        let size = CGSize(width: 1000, height: 800)
+        let m = TiltEstimator.mark(.eyes, CGPoint(x: 400, y: 500), CGPoint(x: 500, y: 510), size)!
+        XCTAssertEqual(m.angle, atan2(10, 100) * 180 / .pi, accuracy: 1e-9)
+        XCTAssertGreaterThan(m.angle, 0)
+        XCTAssertEqual(m.center.y, 1 - 505.0 / 800, accuracy: 1e-9, "中点は左上原点の比率")
+        // 左右の順は問わない
+        XCTAssertEqual(TiltEstimator.mark(.eyes, CGPoint(x: 500, y: 510), CGPoint(x: 400, y: 500), size)!.angle, m.angle, accuracy: 1e-9)
+        XCTAssertNil(TiltEstimator.mark(.eyes, CGPoint(x: 400, y: 500), CGPoint(x: 410, y: 560), size), "縦に近い線は手がかりにしない")
+    }
+}

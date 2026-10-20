@@ -14,6 +14,7 @@ let usage = """
   rawdev mcp <フォルダ> [--log <ファイル>]
                                    MCP サーバー(stdio)。MCP クライアント(Claude Code など)から起動して、
                                    フォルダの写真の現像設定を AI に操作させる。--log は呼び出しごとの記録(JSON Lines)
+  rawdev tilt <ファイル|フォルダ>...       傾きの推定(線と人物を基準に、直す角度)
   rawdev stats <ファイル|フォルダ>... [--json] [--long-edge <px>] [--preview <フォルダ>]
                                    今の設定(サイドカー)で現像した結果の明るさ・白飛び・色の統計
                                    (--preview は AI に見せるのと同じ縮小 JPEG を書き出す)
@@ -161,6 +162,32 @@ case "params":
             let unit = p.unit.map { " \($0)" } ?? ""
             print("  \(p.id)  \(p.label)  \(p.range.lowerBound)...\(p.range.upperBound)\(unit)  基準: \(baseline)")
             print("    \(p.summary)")
+        }
+    }
+
+case "tilt":
+    let urls = expand(arguments.filter { !$0.hasPrefix("--") })
+    if urls.isEmpty { fail("RAWファイルが見つかりません") }
+    for url in urls {
+        do {
+            let start = Date()
+            let photo = try engine.open(url)
+            let r = try TiltEstimator.estimate(photo, settings: photo.settings, pipeline: engine.pipeline)
+            let ms = Int(Date().timeIntervalSince(start) * 1000)
+            print("■ \(url.lastPathComponent)  (\(ms)ms。値は set_crop の angle に入れると直る角度)")
+            for (name, axis) in [("水平の線", r.lines.horizontal), ("垂直の線", r.lines.vertical)] {
+                if let a = axis {
+                    print(String(format: "  %@: %+.2f°  そろい %.2f  ばらつき %.2f°  %d px", name, a.angle, a.support, a.spread, a.pixels))
+                } else {
+                    print("  \(name): 見つからない")
+                }
+            }
+            if r.subjects.isEmpty { print("  人物: 見つからない") }
+            for m in r.subjects {
+                print(String(format: "  人物(%@): %+.2f°  位置 (%.2f, %.2f)", m.kind == .eyes ? "目" : "肩", m.angle, m.center.x, m.center.y))
+            }
+        } catch {
+            FileHandle.standardError.write("\(url.lastPathComponent): \(error)\n".data(using: .utf8)!)
         }
     }
 
