@@ -31,6 +31,16 @@ final class EditorModel: ObservableObject {
     @Published var selection: URL?
     @Published private(set) var photo: Photo?
     @Published private(set) var preview: CGImage?
+    /// 表示しているプレビューのヒストグラム(調整パネルの一番上)
+    @Published private(set) var histogram: Histogram?
+
+    /// 撮影時のフォーカス位置を、今の表示(切り抜き・傾き補正の後。クロップ枠の調整中は傾けただけの全体)の位置で。無ければ nil
+    var displayedFocusPoint: CGPoint? {
+        guard let photo, let p = photo.metadata.focusPoint else { return nil }
+        let upright = FocusPointMapping.upright(p, orientation: photo.metadata.orientation)
+        let crop = isCropping ? settings.crop.map { CropSettings(angle: $0.angle) } : settings.crop
+        return FocusPointMapping.displayed(upright, crop: crop, imageAspect: photo.imageAspect)
+    }
     /// preview を描いたときの RenderOptions.scale(写真の等倍に対する比)
     @Published private(set) var previewRenderScale: Double = 1
     @Published private(set) var isRendering = false
@@ -324,12 +334,15 @@ final class EditorModel: ObservableObject {
         let job = RenderJob(photo: photo, pipeline: engine.pipeline)
         let context = ciContext
         let generation = self.generation
+        // 効く場所の表示(灰色の画像)はヒストグラムに数えない
+        let countsHistogram = options.colorAdjustMask == nil
         isRendering = true
 
         renderQueue.async { [weak self] in
             // 描画待ちの間に新しい要求が来ていたら、この要求は捨てる
             guard generation.isCurrent(gen) else { return }
             var result: Result<CGImage, Error>
+            var histogram: Histogram?
             do {
                 let image = try job.pipeline.process(job.photo, settings: settings, options: options)
                 let cs = CGColorSpace(name: CGColorSpace.displayP3)!
@@ -338,6 +351,7 @@ final class EditorModel: ObservableObject {
                     throw RAWError.renderFailed("プレビュー画像を作れません")
                 }
                 result = .success(cg)
+                if countsHistogram { histogram = Histogram.compute(cg, colorSpace: cs) }
             } catch {
                 result = .failure(error)
             }
@@ -348,6 +362,7 @@ final class EditorModel: ObservableObject {
                 case .success(let cg):
                     self.previewRenderScale = scale
                     self.preview = cg
+                    if let histogram { self.histogram = histogram }
                 case .failure(let error): self.errorMessage = "\(error)"
                 }
             }

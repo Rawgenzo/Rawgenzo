@@ -89,6 +89,10 @@ final class RawgenzoToolsSampleTests: XCTestCase {
         XCTAssertEqual(state["adjustments"]?["temperature"], state["as_shot"]?["temperature"])
         XCTAssertTrue(state["follows_baseline"]?.arrayValue?.contains("temperature") == true)
         XCTAssertEqual(state["crop"], .null)
+        // サンプル(DSC03356)は撮影時のフォーカス位置が真ん中(ExifTool で 4240 2832 2120 1416)
+        if let f = state["focus_point"]?.arrayValue?.compactMap(\.doubleValue), f.count == 2 {
+            XCTAssertEqual(f[0], 0.5, accuracy: 0.01); XCTAssertEqual(f[1], 0.5, accuracy: 0.01)
+        }
     }
 
     /// adjust → サイドカーに保存、統計が付く → undo でサイドカーが無い状態に戻る

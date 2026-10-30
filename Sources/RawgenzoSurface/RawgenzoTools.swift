@@ -135,7 +135,8 @@ public enum RawgenzoTools {
         surface.register(ToolDescriptor(
             name: "get_photo", title: "写真の設定",
             description: "写真の撮影情報と、今の現像設定を返す。adjustments は実際に使われる値。"
-                + "follows_baseline に挙がった項目は未指定で、撮影時の値やデコーダの既定値に従っている",
+                + "follows_baseline に挙がった項目は未指定で、撮影時の値やデコーダの既定値に従っている。"
+                + "focus_point は撮影時にピントを合わせた位置(get_preview の画像の比率)で、主な被写体の手がかり",
             input: .object([.init("photo", photoID)], required: ["photo"]),
             effect: .read)) { args, _ in
             let photo = try ws.photo(args["photo"]!.stringValue!)
@@ -990,6 +991,12 @@ public enum RawgenzoTools {
             .map { .string($0.id) })
         o["crop"] = cropJSON(s.crop)
         o["look"] = lookJSON(ws, s.look)
+        // 撮影時にピントを合わせた位置(get_preview の画像 = 切り抜いた後の比率)。主な被写体の手がかり。切り抜きの外なら書かない
+        if let f = photo.metadata.focusPoint,
+           let p = FocusPointMapping.displayed(FocusPointMapping.upright(f, orientation: photo.metadata.orientation),
+                                               crop: s.crop, imageAspect: photo.imageAspect) {
+            o["focus_point"] = [.number((Double(p.x) * 1000).rounded() / 1000), .number((Double(p.y) * 1000).rounded() / 1000)]
+        }
         o["color_adjust"] = colorAdjustJSON(s.colorAdjust)
         o["lens_correction"] = lensJSON(photo, s)
         o["hdr_output"] = .bool(s.hdr.extendedOutput)

@@ -10,6 +10,8 @@ struct InspectorView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     header(photo)
+                    HistogramSection()
+                    ShootingInfoSection(photo: photo)
                     basicSection(photo)
                     lensSection(photo)
                     hdrSection(photo)
@@ -204,7 +206,7 @@ struct InspectorView: View {
 
 /// 調整パネルのセクションの ID。折りたたみの状態を config.json に保存するので、値は変えないこと
 enum InspectorSectionID: String, CaseIterable {
-    case basic, lens, hdr, color, hsl, detail, crop, look
+    case histogram, info, basic, lens, hdr, color, hsl, detail, crop, look
 }
 
 /// 折りたためるセクション。見出しの行のどこをクリックしても開閉する。

@@ -17,11 +17,13 @@ struct AppConfig: Codable, Equatable {
     var lastFolder: String?
     /// AI(MCP の中継 rawdev mcp)からの操作を受け付けるか
     var agent = AgentPreferences()
+    /// 撮影時のフォーカス位置をプレビューに出すか
+    var showsFocusPoint = false
 
     init() {}
 
     private enum CodingKeys: String, CodingKey {
-        case schemaVersion, export, thumbnails, guides, inspector, lastFolder, agent
+        case schemaVersion, export, thumbnails, guides, inspector, lastFolder, agent, showsFocusPoint
     }
 
     // 項目の追加・欠けに強くする(手で編集されても既定値で補う)
@@ -35,6 +37,7 @@ struct AppConfig: Codable, Equatable {
         inspector = (try? c.decodeIfPresent(InspectorPreferences.self, forKey: .inspector)) ?? d.inspector
         lastFolder = try c.decodeIfPresent(String.self, forKey: .lastFolder)
         agent = (try? c.decodeIfPresent(AgentPreferences.self, forKey: .agent)) ?? d.agent
+        showsFocusPoint = (try? c.decodeIfPresent(Bool.self, forKey: .showsFocusPoint)) ?? d.showsFocusPoint
     }
 }
 
@@ -61,7 +64,7 @@ struct InspectorPreferences: Codable, Equatable {
     var defaultsApplied: Set<String> = InspectorPreferences.collapsedByDefault
 
     /// 初めは折りたたんでおくセクション(オーナーの決定、2026-10-30)。細かい調整なので、使うときだけ開く
-    static let collapsedByDefault: Set<String> = ["hsl", "detail"]
+    static let collapsedByDefault: Set<String> = ["hsl", "detail", "info"]
 
     init() {}
 

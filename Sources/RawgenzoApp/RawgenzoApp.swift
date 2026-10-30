@@ -29,6 +29,8 @@ struct RawgenzoApp: App {
                 Menu("構図ガイド") {
                     GuideMenuItems(display: $prefs.config.guides, withShortcuts: true)
                 }
+                Toggle("フォーカス位置を表示", isOn: $prefs.config.showsFocusPoint)
+                    .keyboardShortcut("f", modifiers: [.command, .option])
                 Divider()
                 Button("ウインドウに合わせる") { model.zoomToFit() }
                     .keyboardShortcut("9")
