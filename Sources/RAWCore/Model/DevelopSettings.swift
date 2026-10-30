@@ -6,7 +6,8 @@ public struct DevelopSettings: Codable, Equatable, Sendable {
     /// 1: 最初の形式
     /// 2: レンズ補正を lensCorrection(Bool。実際には効いていなかった)から lens(3 種類の補正)に変えた
     /// 3: contrast を「デコーダのコントラスト(効いていなかった)」から自前のトーンカーブ(−1...1)に変えた
-    public static let currentSchemaVersion = 3
+    /// 4: 色別補正(colorAdjust)を足した
+    public static let currentSchemaVersion = 4
     public var schemaVersion: Int = DevelopSettings.currentSchemaVersion
 
     // --- RAWデコード段 ---
@@ -39,6 +40,9 @@ public struct DevelopSettings: Codable, Equatable, Sendable {
     /// 自然な彩度 (0 = 変更なし, -1...1)
     public var vibrance: Double = 0
 
+    // --- 色別補正(nil = なし) ---
+    public var colorAdjust: ColorAdjustSettings? = nil
+
     // --- クロップ(nil = 切り抜きなし) ---
     public var crop: CropSettings? = nil
 
@@ -50,7 +54,7 @@ public struct DevelopSettings: Codable, Equatable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case schemaVersion, exposure, temperature, tint, contrast, sharpness
         case luminanceNoiseReduction, colorNoiseReduction, lens
-        case hdr, saturation, vibrance, crop, look
+        case hdr, saturation, vibrance, colorAdjust, crop, look
     }
 
     public init(from decoder: Decoder) throws {
@@ -68,6 +72,8 @@ public struct DevelopSettings: Codable, Equatable, Sendable {
         hdr = try c.decodeIfPresent(HDRSettings.self, forKey: .hdr) ?? d.hdr
         saturation = try c.decodeIfPresent(Double.self, forKey: .saturation) ?? d.saturation
         vibrance = try c.decodeIfPresent(Double.self, forKey: .vibrance) ?? d.vibrance
+        // 読めない形なら無しにする(色別補正が壊れていても、ほかの設定は読めるように)
+        colorAdjust = (try? c.decodeIfPresent(ColorAdjustSettings.self, forKey: .colorAdjust)) ?? nil
         crop = try c.decodeIfPresent(CropSettings.self, forKey: .crop)
         look = try c.decodeIfPresent(LookSelection.self, forKey: .look)
     }

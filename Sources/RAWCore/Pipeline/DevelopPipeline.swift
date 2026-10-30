@@ -13,6 +13,7 @@ public struct DevelopPipeline {
             HDRToneStage(),
             ContrastStage(),   // HDR トーン(ハイライト/シャドウ)の後、色の前
             ColorStage(),
+            ColorAdjustStage(),   // 色別補正。彩度・自然な彩度の後、クロップ・ルックの前
             CropStage(),
             LookStage(registry: looks),
         ])
