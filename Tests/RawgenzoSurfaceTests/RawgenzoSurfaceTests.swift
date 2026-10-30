@@ -89,6 +89,12 @@ final class RawgenzoToolsSampleTests: XCTestCase {
         XCTAssertEqual(state["adjustments"]?["temperature"], state["as_shot"]?["temperature"])
         XCTAssertTrue(state["follows_baseline"]?.arrayValue?.contains("temperature") == true)
         XCTAssertEqual(state["crop"], .null)
+        // 撮影情報の残り(DSC03356 は ExifTool で 露出補正 +0.3・絞り優先)
+        XCTAssertEqual(state["exposure_mode"], "絞り優先")
+        XCTAssertEqual(try XCTUnwrap(state["exposure_bias"]?.doubleValue), 0.3, accuracy: 0.01)
+        let full = try json(surface.call("get_stats", arguments: ["photo": .string(id), "detail": "full"], as: ai))
+        XCTAssertEqual(full["rgb_histograms"]?.arrayValue?.count, 3)
+        XCTAssertEqual(full["rgb_histograms"]?.arrayValue?.first?.arrayValue?.count, ImageStats.histogramBins)
         // サンプル(DSC03356)は撮影時のフォーカス位置が真ん中(ExifTool で 4240 2832 2120 1416)
         if let f = state["focus_point"]?.arrayValue?.compactMap(\.doubleValue), f.count == 2 {
             XCTAssertEqual(f[0], 0.5, accuracy: 0.01); XCTAssertEqual(f[1], 0.5, accuracy: 0.01)

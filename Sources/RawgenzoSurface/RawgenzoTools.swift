@@ -146,8 +146,9 @@ public enum RawgenzoTools {
         surface.register(ToolDescriptor(
             name: "get_stats", title: "現像結果の統計",
             description: "今の設定(changes を渡すと、それを仮に当てた設定。保存はしない)で現像した結果の統計を返す。"
-                + "輝度の平均・中央値・1%/99% 点、白飛び・黒つぶれの割合、平均 RGB。"
-                + "detail を full にすると 32 区間のヒストグラム(histogram、暗い側から)と、写真を 8×8 に区切った各区画の平均 RGB(grid_rgb、行は上から・列は左から)も返す(約 1.7KB)。"
+                + "輝度の平均・中央値・1%/99% 点、白飛び・黒つぶれの割合、平均 RGB。白飛びがあれば channel_clipping(R・G・B 別の割合。どの色が飽和しているか)。"
+                + "detail を full にすると 32 区間のヒストグラム(histogram は輝度、rgb_histograms は R・G・B。暗い側から)と、"
+                + "写真を 8×8 に区切った各区画の平均 RGB(grid_rgb、行は上から・列は左から)も返す(約 2.5KB)。"
                 + "長辺 1024 に縮小して計算するので、点光源のようなごく小さな白飛びは数え漏れることがある",
             input: .object([
                 .init("photo", photoID),
@@ -941,7 +942,7 @@ public enum RawgenzoTools {
 
     /// 統計の要約(ヒストグラムと区画を除いたもの)
     static func summary(_ s: ImageStats) -> JSONValue {
-        [
+        var o: [String: JSONValue] = [
             "mean_luminance": .number(s.meanLuminance),
             "median_luminance": .number(s.medianLuminance),
             "p01_luminance": .number(s.p01Luminance),
@@ -950,12 +951,16 @@ public enum RawgenzoTools {
             "shadow_clipping": .number(s.shadowClipping),
             "mean_rgb": .array(s.meanRGB.map { .number($0) }),
         ]
+        // どの色が飽和しているか。白飛びが無いときの [0, 0, 0] は何も伝えないので書かない(トークンの節約)
+        if s.highlightClipping > 0 { o["channel_clipping"] = .array(s.channelClipping.map { .number($0) }) }
+        return .object(o)
     }
 
     /// 統計のすべて(要約 + ヒストグラム + 8×8 区画)。キーは要約と同じ書き方にそろえる
     static func full(_ s: ImageStats) -> JSONValue {
         var o = summary(s).objectValue ?? [:]
         o["histogram"] = .array(s.histogram.map { .number($0) })
+        o["rgb_histograms"] = .array(s.rgbHistograms.map { .array($0.map { .number($0) }) })
         o["grid_rgb"] = .array(s.grid.map { row in .array(row.map { cell in .array(cell.map { .number($0) }) }) })
         o["computed_size"] = [.number(Double(s.width)), .number(Double(s.height))]
         return .object(o)
@@ -991,6 +996,14 @@ public enum RawgenzoTools {
             .map { .string($0.id) })
         o["crop"] = cropJSON(s.crop)
         o["look"] = lookJSON(ws, s.look)
+        // 撮影情報の残り(get_photo だけ。list_photos は写真の数だけ長くなるので足さない)。値の無い項目は書かない
+        let m = photo.metadata
+        if let v = m.exposureBias { o["exposure_bias"] = .number(round4(v)) }
+        if let v = ExifLabels.exposureProgram(m.exposureProgram) { o["exposure_mode"] = .string(v) }
+        if let v = ExifLabels.meteringMode(m.meteringMode) { o["metering"] = .string(v) }
+        if let v = ExifLabels.whiteBalance(m.whiteBalance) { o["white_balance_mode"] = .string(v) }
+        if let v = ExifLabels.flash(m.flash) { o["flash"] = .string(v) }
+        if let v = m.focalLength35mm, v > 0 { o["focal_length_35mm"] = .number(v) }
         // 撮影時にピントを合わせた位置(get_preview の画像 = 切り抜いた後の比率)。主な被写体の手がかり。切り抜きの外なら書かない
         if let f = photo.metadata.focusPoint,
            let p = FocusPointMapping.displayed(FocusPointMapping.upright(f, orientation: photo.metadata.orientation),
