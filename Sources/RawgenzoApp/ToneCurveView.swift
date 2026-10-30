@@ -157,10 +157,13 @@ private struct CurveValueField: View {
     let commit: (Int, Int) -> Void
     @State private var text = ""
     @State private var editing: Int?
+    /// 人が打ちかけている(まだ確定していない)。打ちかけでなければ、表示は常に点の値に合わせる。
+    /// フォーカスの有無で決めていた最初の版は、return で確定した後も欄にフォーカスが残るので、新しい値が欄に出なかった
+    @State private var dirty = false
     @FocusState private var focused: Bool
 
     var body: some View {
-        TextField("", text: $text)
+        TextField("", text: Binding(get: { text }, set: { text = $0; dirty = true }))
             .textFieldStyle(.roundedBorder)
             .multilineTextAlignment(.center)
             .monospacedDigit()
@@ -168,16 +171,21 @@ private struct CurveValueField: View {
             .disabled(!enabled || value == nil)
             .focused($focused)
             .onAppear { text = value.map(String.init) ?? "" }
-            .onChange(of: value) { v in if !focused { text = v.map(String.init) ?? "" } }
-            .onChange(of: target) { _ in if !focused { text = value.map(String.init) ?? "" } }
+            .onChange(of: value) { v in if !dirty { text = v.map(String.init) ?? "" } }
+            .onChange(of: target) { _ in if !dirty { text = value.map(String.init) ?? "" } }
             .onChange(of: focused) { f in if f { editing = target } else { send() } }
             .onSubmit(send)
     }
 
     private func send() {
-        if let i = editing ?? target, let v = Int(text.trimmingCharacters(in: .whitespaces)) { commit(min(max(v, 0), 255), i) }
-        if !focused { editing = nil }
+        // 先に表示を今の値に戻しておき、確定して値が変われば onChange(of: value) で新しい値に替わる
+        // (範囲の外を打ったときは、丸めた値が出る)
+        // 打ちかけでなければ何も当てない(欄の表示は別の点の値に替わっていることがある)
+        let typed = dirty ? Int(text.trimmingCharacters(in: .whitespaces)) : nil
+        dirty = false
         text = value.map(String.init) ?? ""
+        if let i = editing ?? target, let v = typed { commit(min(max(v, 0), 255), i) }
+        if !focused { editing = nil }
     }
 }
 
