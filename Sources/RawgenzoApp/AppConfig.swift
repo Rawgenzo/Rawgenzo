@@ -63,8 +63,8 @@ struct InspectorPreferences: Codable, Equatable {
     /// 初めの状態(collapsedByDefault)を一度当てたセクション。当てた後は、人が開け閉めした状態を保つ
     var defaultsApplied: Set<String> = InspectorPreferences.collapsedByDefault
 
-    /// 初めは折りたたんでおくセクション(オーナーの決定、2026-10-30)。細かい調整なので、使うときだけ開く
-    static let collapsedByDefault: Set<String> = ["hsl", "detail", "info"]
+    /// 初めは折りたたんでおくセクション(オーナーの決定、2026-10-30。トーンカーブも同じ日に足した)。細かい調整なので、使うときだけ開く
+    static let collapsedByDefault: Set<String> = ["hsl", "detail", "info", "curve"]
 
     init() {}
 
