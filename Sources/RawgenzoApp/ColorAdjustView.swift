@@ -63,7 +63,7 @@ struct ColorBandsPanel: View {
                     .help(b.label)
                 }
             }
-            HueStrip(band: band).frame(height: 18)
+            HueStrip(band: band).frame(height: 30)
             HStack {
                 Text(band.label).font(.callout.weight(.semibold))
                 Spacer()
@@ -151,9 +151,10 @@ struct HueStrip: View {
             for shift in [-360.0, 0, 360] {
                 let a = x(lo + shift), c = x(center + shift), b = x(hi + shift)
                 guard b > 0, a < size.width else { continue }
+                // 山は帯(y 8〜16)の下に描く。両端 y 28、制御点 y 8 で、頂点は y 18(帯の下端の少し下)
                 var arc = Path()
-                arc.move(to: CGPoint(x: a, y: 17))
-                arc.addQuadCurve(to: CGPoint(x: b, y: 17), control: CGPoint(x: c, y: -6))
+                arc.move(to: CGPoint(x: a, y: 28))
+                arc.addQuadCurve(to: CGPoint(x: b, y: 28), control: CGPoint(x: c, y: 8))
                 ctx.stroke(arc, with: .color(.primary.opacity(0.8)), lineWidth: 1.2)
                 var tri = Path()
                 tri.move(to: CGPoint(x: c, y: 7)); tri.addLine(to: CGPoint(x: c - 4, y: 1)); tri.addLine(to: CGPoint(x: c + 4, y: 1))
