@@ -144,7 +144,9 @@ struct HueStrip: View {
             ctx.fill(Path(roundedRect: bar, cornerRadius: 4),
                      with: .linearGradient(Gradient(stops: stops), startPoint: CGPoint(x: 0, y: 0), endPoint: CGPoint(x: size.width, y: 0)))
             let (lo, center, hi) = ColorAdjustColors.span(band)
-            func x(_ h: Double) -> CGFloat { size.width * CGFloat(h.truncatingRemainder(dividingBy: 360) / 360) }
+            // 0〜360 に丸めない。範囲が 0° をまたぐ帯は、下で ±360° ずらして左右の端に分けて描くので、
+            // 丸めるとずらした分が戻り、右から左へ戻る長い弧が余計に描かれた(赤・マゼンタ。オーナーの指摘)
+            func x(_ h: Double) -> CGFloat { size.width * CGFloat(h / 360) }
             // 範囲が 0° をまたぐ帯(赤・マゼンタ)は、山を 2 つに分けて描く
             for shift in [-360.0, 0, 360] {
                 let a = x(lo + shift), c = x(center + shift), b = x(hi + shift)
@@ -158,6 +160,7 @@ struct HueStrip: View {
                 ctx.fill(tri, with: .color(.primary))
             }
         }
+        .clipped()   // 端からはみ出す側の山は帯の外に描かない
         .accessibilityHidden(true)
     }
 }
