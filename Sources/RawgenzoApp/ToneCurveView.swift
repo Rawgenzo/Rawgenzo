@@ -285,18 +285,19 @@ struct ToneCurveGraph: View {
             // 数値欄の入力を確定してフォーカスを外し、矢印キーをグラフで受ける
             NSApp.keyWindow?.makeFirstResponder(nil)
             keys.isActive = true
-            // つかむ点を決める。近くに点が無ければ、その x のカーブの上に点を足す
+            // つかむ点を決める。近くに点が無ければ、クリックした所に点を足す(オーナーの選択。カーブの上に足す案もあった)
             let p = points
             let near = p.indices.min { distance(toView(p[$0], size), g.startLocation) < distance(toView(p[$1], size), g.startLocation) }
             if let near, distance(toView(p[near], size), g.startLocation) <= hitRadius {
                 drag = (p, near)
                 selected = near
             } else if p.count < ToneCurveSettings.maxPoints {
-                let x = toCurve(g.startLocation, size).x
+                let c = toCurve(g.startLocation, size)
+                let x = c.x
                 guard let i = p.firstIndex(where: { $0.x > x }), i > 0,
                       x - p[i - 1].x >= ToneCurveSettings.minGap, p[i].x - x >= ToneCurveSettings.minGap else { return }
                 var q = p
-                q.insert(CurvePoint(x, min(max(ToneCurveFunction(p)(x), 0), 1)), at: i)
+                q.insert(CurvePoint(x, c.y), at: i)
                 drag = (q, i)
                 selected = i
                 onChange(q)
