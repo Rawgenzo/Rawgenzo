@@ -194,7 +194,7 @@ b.append(header(y, "色別補正"))
 b.append(segmented(36, ["8 色", "拾った色"], 1))
 b.append(note(W - 8, 30, 1))
 
-# 拾った色の一覧(写真ごとに 4 つまで)と、新しく拾うボタン
+# 拾った色の一覧(数の制限なし)と、新しく拾うボタン
 y = 76
 tiles = [(PICK_H, PICK_S, "花びら"), (95, 0.55, "若葉")]
 for k, (hh, ss, label) in enumerate(tiles):
@@ -208,7 +208,7 @@ x = 16 + 2 * 66
 b.append(f'<rect x="{x}" y="{y}" width="{W-16-x}" height="50" rx="6" fill="none" stroke="{ACCENT}" stroke-dasharray="4 3"/>')
 b.append(pipette(x + 26, y + 22, scale=1.3))
 b.append(text(x + 44, y + 22, "色を拾う", 11, ACCENT))
-b.append(text(x + 44, y + 37, "(4 つまで)", 10, TEXT3))
+b.append(text(x + 44, y + 37, "(いくつでも)", 10, TEXT3))
 b.append(note(8, y - 2, 2))
 
 # 効く範囲の図: 横が色相、縦が淡さ(上が淡い、下が濃い)。選んだ範囲を枠で、なめらかさを点線で示す
