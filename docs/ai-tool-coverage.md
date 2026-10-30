@@ -35,9 +35,9 @@ Rawgenzo アプリの画面でできることのうち、どれを AI の道具(
 | プレビューを見る | `get_preview`(縮小 JPEG。画像はトークンを多く使う)・`get_stats`(数値。安い) |
 | 一部を拡大して見る | `get_preview` の `region`(等倍まで) |
 | クロップ枠・構図ガイドを重ねて見る | `get_preview` の `show_crop_frame`・`guide`(枠の中にガイドを描く) |
-| 撮影情報(EXIF) | `list_photos`・`get_photo`(撮影日時・ISO・シャッター・絞り・焦点距離・レンズ) |
+| 撮影情報(EXIF) | `list_photos`・`get_photo`(撮影日時・ISO・シャッター・絞り・焦点距離・レンズ)。露出補正・露出モード・測光・WB の設定・フラッシュ・35mm 換算は `get_photo` だけ |
 | フォーカス位置 | `get_photo` の `focus_point`(get_preview の画像の比率。主な被写体の手がかり) |
-| ヒストグラム | `get_stats`(detail: full で 32 区間。画面の 256 区間は数値の判断には要らない) |
+| ヒストグラム | `get_stats`(白飛びがあれば R・G・B 別の割合 channel_clipping。detail: full で輝度と R・G・B の 32 区間。画面の 256 区間は数値の判断には要らない) |
 | (GUI には無い) 取り消し・操作の履歴 | `undo`・`recent_operations`(操作面の汎用の道具) |
 | (GUI には無い) 傾きの手がかり | `estimate_tilt`(番号付きの直線と人物の目・肩の線。AI が基準の線を選ぶと角度を返す) |
 

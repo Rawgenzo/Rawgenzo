@@ -240,7 +240,8 @@ ARW → CameraRegistry が機種判定 → CameraProfile.makeSource → RAWSourc
 - **フォーカス位置**: ソニーの MakerNote(EXIF の 0x927c。見出し "SONY DSC \0\0\0" の 12 バイトの後に IFD、オフセットはファイルの先頭から)の
   FocusLocation(0x2027、幅・高さ・x・y)。ImageIO では取れないので TIFFReader で読む。記録はカメラの向き(横長)で、写真の向き(Orientation)
   → 傾き補正 → 切り抜きの順に直す(FocusPointMapping)。α7S III ではゾーン AF・顔の追尾のどちらでも 1 点が入る(枠の大きさは無い)。
-  AI の get_photo にも focus_point(get_preview の画像の比率)で返す
+  AI の get_photo にも focus_point(get_preview の画像の比率)で返す。撮影情報の残り(露出補正・測光など)も get_photo だけに足す
+  (list_photos は写真の数だけ長くなるため)。get_stats の要約は、白飛びがあるときだけ channel_clipping(R・G・B 別)を付ける
 - **ヒストグラムは Display P3 のまま数える**。プレビューは P3 で描くので、sRGB に直して数えると sRGB の外の鮮やかな色が 255/0 に切られ、
   白飛び・黒つぶれを多く数える。効く場所の表示(灰色の画像)の間は数えない
 - **画像に文字を描くとき、`CTLineGetImageBounds` は今の文字の位置からの範囲を返す**。`textPosition` を 0 にしてから測る

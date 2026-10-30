@@ -17,12 +17,17 @@ public struct ImageStats: Codable, Equatable, Sendable {
     public var p99Luminance: Double
     /// 白飛びの割合: どれかのチャンネルが highlightThreshold 以上の画素
     public var highlightClipping: Double
+    /// チャンネルごとの白飛びの割合 [R, G, B](そのチャンネルが highlightThreshold 以上の画素)。
+    /// 赤い花の赤だけが飽和している、のように、どの色が飽和しているかを見るため
+    public var channelClipping: [Double]
     /// 黒つぶれの割合: すべてのチャンネルが shadowThreshold 以下の画素
     public var shadowClipping: Double
     /// RGB それぞれの平均。R と B の差で暖色・寒色への偏り、G の高低で緑・マゼンタへの偏りの目安になる
     public var meanRGB: [Double]
     /// 輝度のヒストグラム(histogramBins 区間、割合。合計 1)
     public var histogram: [Double]
+    /// チャンネルごとのヒストグラム [R, G, B](それぞれ histogramBins 区間、割合)
+    public var rgbHistograms: [[Double]]
     /// 写真を gridSize × gridSize に区切った各区画の平均 RGB。行は上から、列は左から
     public var grid: [[[Double]]]
 
@@ -61,6 +66,8 @@ public struct ImageStats: Codable, Equatable, Sendable {
         let n = w * h
         let bins = histogramBins, g = gridSize
         var hist = [Int](repeating: 0, count: bins)
+        var rgbHist = [[Int]](repeating: [Int](repeating: 0, count: bins), count: 3)
+        var channelHi = [0, 0, 0]
         // 中央値などはヒストグラムより細かく取りたいので 1024 段の累積で求める
         let fine = 1024
         var fineHist = [Int](repeating: 0, count: fine)
@@ -80,6 +87,10 @@ public struct ImageStats: Codable, Equatable, Sendable {
                 fineHist[min(Int(c * Double(fine)), fine - 1)] += 1
                 sumY += c; sumR += r; sumG += gg; sumB += b
                 if max(r, gg, b) >= highlightThreshold { hi += 1 }
+                for (k, v) in [r, gg, b].enumerated() {
+                    rgbHist[k][min(max(Int(v * Double(bins)), 0), bins - 1)] += 1
+                    if v >= highlightThreshold { channelHi[k] += 1 }
+                }
                 if max(r, gg, b) <= shadowThreshold { lo += 1 }
                 let cell = row * g + min(x * g / w, g - 1)
                 cellSum[cell][0] += r; cellSum[cell][1] += gg; cellSum[cell][2] += b
@@ -111,9 +122,11 @@ public struct ImageStats: Codable, Equatable, Sendable {
             p01Luminance: round3(percentile(0.01)),
             p99Luminance: round3(percentile(0.99)),
             highlightClipping: round4(Double(hi) / total),
+            channelClipping: channelHi.map { round4(Double($0) / total) },
             shadowClipping: round4(Double(lo) / total),
             meanRGB: [sumR, sumG, sumB].map { round3($0 / total) },
             histogram: hist.map { round4(Double($0) / total) },
+            rgbHistograms: rgbHist.map { $0.map { round4(Double($0) / total) } },
             grid: grid)
     }
 
