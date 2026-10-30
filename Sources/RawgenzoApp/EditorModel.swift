@@ -17,6 +17,12 @@ private final class Generation: @unchecked Sendable {
 /// Photo(中の CIRAWFilter)はスレッドセーフではないので Sendable ではないが、
 /// RAWSource に触るのは直列の renderQueue だけという決まりで守っているため、ここでだけ受け渡しを許す。
 /// photo.settings はメインで書き換わるので、renderQueue 側では読まず、必ず settings を引数で渡すこと。
+/// カーブの入力のヒストグラムを数えた条件(写真と、カーブを外した設定)
+private struct CurveInputKey: Equatable {
+    var url: URL
+    var settings: DevelopSettings
+}
+
 private struct RenderJob: @unchecked Sendable {
     let photo: Photo
     let pipeline: DevelopPipeline
@@ -33,6 +39,10 @@ final class EditorModel: ObservableObject {
     @Published private(set) var preview: CGImage?
     /// 表示しているプレビューのヒストグラム(調整パネルの一番上)
     @Published private(set) var histogram: Histogram?
+    /// トーンカーブを掛ける前のヒストグラム(カーブのグラフの後ろに出す。グラフの横軸は入力なので、カーブを当てた後の分布では
+    /// ドラッグのたびに背景が動いてしまう)。カーブ以外の設定が変わったときだけ数え直す
+    @Published private(set) var curveInputHistogram: Histogram?
+    private var curveInputKey: CurveInputKey?
 
     /// 撮影時のフォーカス位置を、今の表示(切り抜き・傾き補正の後。クロップ枠の調整中は傾けただけの全体)の位置で。無ければ nil
     var displayedFocusPoint: CGPoint? {
@@ -336,6 +346,11 @@ final class EditorModel: ObservableObject {
         let generation = self.generation
         // 効く場所の表示(灰色の画像)はヒストグラムに数えない
         let countsHistogram = options.colorAdjustMask == nil
+        // カーブがあるときは、カーブを外した画像を別に(長辺 512 で)数える。カーブ以外が前と同じなら数え直さない
+        var curveInput = settings
+        curveInput.toneCurve = nil
+        let curveKey = CurveInputKey(url: photo.url, settings: curveInput)
+        let countsCurveInput = countsHistogram && settings.toneCurve != nil && curveInputKey != curveKey
         isRendering = true
 
         renderQueue.async { [weak self] in
@@ -343,6 +358,7 @@ final class EditorModel: ObservableObject {
             guard generation.isCurrent(gen) else { return }
             var result: Result<CGImage, Error>
             var histogram: Histogram?
+            var curveHistogram: Histogram?
             do {
                 let image = try job.pipeline.process(job.photo, settings: settings, options: options)
                 let cs = CGColorSpace(name: CGColorSpace.displayP3)!
@@ -352,6 +368,11 @@ final class EditorModel: ObservableObject {
                 }
                 result = .success(cg)
                 if countsHistogram { histogram = Histogram.compute(cg, colorSpace: cs) }
+                if countsCurveInput,
+                   let small = try? job.pipeline.processFitting(job.photo, settings: curveInput, longEdge: 512),
+                   let smallCG = context.createCGImage(small, from: small.extent, format: .RGBA8, colorSpace: cs) {
+                    curveHistogram = Histogram.compute(smallCG, step: 1, colorSpace: cs)
+                }
             } catch {
                 result = .failure(error)
             }
@@ -362,7 +383,12 @@ final class EditorModel: ObservableObject {
                 case .success(let cg):
                     self.previewRenderScale = scale
                     self.preview = cg
-                    if let histogram { self.histogram = histogram }
+                    if let histogram {
+                        self.histogram = histogram
+                        // カーブが無ければ、表示している画像がそのままカーブの入力
+                        if settings.toneCurve == nil { self.curveInputHistogram = histogram; self.curveInputKey = nil }
+                    }
+                    if let curveHistogram { self.curveInputHistogram = curveHistogram; self.curveInputKey = curveKey }
                 case .failure(let error): self.errorMessage = "\(error)"
                 }
             }
@@ -581,6 +607,7 @@ final class EditorModel: ObservableObject {
         if oldLens?.chromaticAberration != newLens?.chromaticAberration { changed.insert("lens.chromaticAberration") }
         if settings.hdr.extendedOutput != new.hdr.extendedOutput { changed.insert("hdr.extendedOutput") }
         if settings.colorAdjust != new.colorAdjust { changed.insert("colorAdjust") }
+        if settings.toneCurve != new.toneCurve { changed.insert("toneCurve") }
         photo.settings = new
         settings = new
         highlight(changed)
@@ -630,6 +657,7 @@ final class EditorModel: ObservableObject {
         case "set_hdr_output": what = "\(task)HDR 出力を変更しました"
         case "reset_settings": what = "\(task)設定を初期値に戻しました"
         case "adjust_colors", "set_color_point": what = "\(task)色別補正を変更しました"
+        case "set_tone_curve": what = "\(task)トーンカーブを変更しました"
         // 文言を登録していない道具は、道具の名前だけを出す。以前は「写真を変更しました」にしていて、
         // 読むだけの get_app_state でもそう出た(オーナーの指摘)。登録を忘れても「変更した」と誤って言わないようにする
         default: what = "\(task) \(r.tool) を使いました"

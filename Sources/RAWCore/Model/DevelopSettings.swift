@@ -7,7 +7,8 @@ public struct DevelopSettings: Codable, Equatable, Sendable {
     /// 2: レンズ補正を lensCorrection(Bool。実際には効いていなかった)から lens(3 種類の補正)に変えた
     /// 3: contrast を「デコーダのコントラスト(効いていなかった)」から自前のトーンカーブ(−1...1)に変えた
     /// 4: 色別補正(colorAdjust)を足した
-    public static let currentSchemaVersion = 4
+    /// 5: トーンカーブ(toneCurve)を足した
+    public static let currentSchemaVersion = 5
     public var schemaVersion: Int = DevelopSettings.currentSchemaVersion
 
     // --- RAWデコード段 ---
@@ -20,6 +21,8 @@ public struct DevelopSettings: Codable, Equatable, Sendable {
     /// 以前はデコーダのコントラスト(nil = 既定値)だったが、CIRAWFilter.contrastAmount は ARW では効かず、
     /// UI・CLI にも出していなかったので、同じ項目を使い直した(schemaVersion 3)
     public var contrast: Double = 0
+    /// トーンカーブ(nil = なし)。コントラストの後に掛ける(ToneCurveStage)
+    public var toneCurve: ToneCurveSettings? = nil
     /// シャープネス(DetailRanges.sharpness。nil = デコーダ既定値。α7S III では 1)。デコーダは等倍で描くときだけ掛ける
     /// (縮小して描くプレビューには効かない。2026-10-07 に確認)
     public var sharpness: Double? = nil
@@ -52,7 +55,7 @@ public struct DevelopSettings: Codable, Equatable, Sendable {
     public init() {}
 
     private enum CodingKeys: String, CodingKey {
-        case schemaVersion, exposure, temperature, tint, contrast, sharpness
+        case schemaVersion, exposure, temperature, tint, contrast, toneCurve, sharpness
         case luminanceNoiseReduction, colorNoiseReduction, lens
         case hdr, saturation, vibrance, colorAdjust, crop, look
     }
@@ -65,6 +68,8 @@ public struct DevelopSettings: Codable, Equatable, Sendable {
         temperature = try c.decodeIfPresent(Double.self, forKey: .temperature)
         tint = try c.decodeIfPresent(Double.self, forKey: .tint)
         contrast = (try? c.decodeIfPresent(Double.self, forKey: .contrast)) ?? d.contrast
+        // 読めない形なら無しにする(トーンカーブが壊れていても、ほかの設定は読めるように)
+        toneCurve = (try? c.decodeIfPresent(ToneCurveSettings.self, forKey: .toneCurve)) ?? nil
         sharpness = try c.decodeIfPresent(Double.self, forKey: .sharpness)
         luminanceNoiseReduction = try c.decodeIfPresent(Double.self, forKey: .luminanceNoiseReduction)
         colorNoiseReduction = try c.decodeIfPresent(Double.self, forKey: .colorNoiseReduction)

@@ -327,6 +327,7 @@ public enum RawgenzoTools {
         registerTilt(on: surface, workspace: ws)
         registerLook(on: surface, workspace: ws)
         registerColorAdjust(on: surface, workspace: ws)
+        registerToneCurve(on: surface, workspace: ws)
         registerOptions(on: surface, workspace: ws)
     }
 
@@ -1011,6 +1012,7 @@ public enum RawgenzoTools {
             o["focus_point"] = [.number((Double(p.x) * 1000).rounded() / 1000), .number((Double(p.y) * 1000).rounded() / 1000)]
         }
         o["color_adjust"] = colorAdjustJSON(s.colorAdjust)
+        o["tone_curve"] = toneCurveJSON(s.toneCurve)
         o["lens_correction"] = lensJSON(photo, s)
         o["hdr_output"] = .bool(s.hdr.extendedOutput)
         return o

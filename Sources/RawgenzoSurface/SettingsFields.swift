@@ -5,7 +5,7 @@ import RAWCore
 /// 後から別の操作が同じ項目を変えていたら断るために使う(履歴ではなく今の状態で確かめる)
 enum SettingsFields {
     /// 数値パラメータ(ParameterCatalog の id)以外の項目
-    static let otherIDs = ["crop", "look", "lens", "hdr.extendedOutput", "colorAdjust"]
+    static let otherIDs = ["crop", "look", "lens", "hdr.extendedOutput", "colorAdjust", "toneCurve"]
 
     static func label(_ id: String) -> String {
         if let p = ParameterCatalog.descriptor(id) { return p.label }
@@ -15,6 +15,7 @@ enum SettingsFields {
         case "lens": return "レンズ補正"
         case "hdr.extendedOutput": return "HDR 出力"
         case "colorAdjust": return "色別補正"
+        case "toneCurve": return "トーンカーブ"
         default: return id
         }
     }
@@ -32,6 +33,7 @@ enum SettingsFields {
         case "lens": return a.lens == b.lens
         case "hdr.extendedOutput": return a.hdr.extendedOutput == b.hdr.extendedOutput
         case "colorAdjust": return a.colorAdjust == b.colorAdjust
+        case "toneCurve": return a.toneCurve == b.toneCurve
         default: return true
         }
     }
@@ -48,6 +50,7 @@ enum SettingsFields {
         case "lens": dest.lens = source.lens
         case "hdr.extendedOutput": dest.hdr.extendedOutput = source.hdr.extendedOutput
         case "colorAdjust": dest.colorAdjust = source.colorAdjust
+        case "toneCurve": dest.toneCurve = source.toneCurve
         default: break
         }
     }
@@ -63,6 +66,7 @@ enum SettingsFields {
         case "lens": return s.lens == nil ? "カメラ設定に従う" : "指定あり"
         case "hdr.extendedOutput": return s.hdr.extendedOutput ? "オン" : "オフ"
         case "colorAdjust": return s.colorAdjust.map { $0.isNeutral ? "なし" : "あり" } ?? "なし"
+        case "toneCurve": return s.toneCurve.map { $0.isNeutral ? "なし" : "あり" } ?? "なし"
         default: return "?"
         }
     }

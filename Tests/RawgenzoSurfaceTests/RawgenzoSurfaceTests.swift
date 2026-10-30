@@ -21,7 +21,7 @@ final class RawgenzoToolsSchemaTests: XCTestCase {
         let ws = RawgenzoWorkspace(folder: FileManager.default.temporaryDirectory)
         let surface = RawgenzoTools.makeSurface(workspace: ws)
         XCTAssertEqual(surface.descriptors.map(\.name),
-                       ["get_app_state", "list_photos", "get_photo", "get_stats", "get_preview", "adjust", "set_crop", "estimate_tilt", "list_looks", "set_look", "adjust_colors", "set_color_point", "set_lens_correction", "set_hdr_output", "reset_settings", "solve_exposure", "undo", "recent_operations"])
+                       ["get_app_state", "list_photos", "get_photo", "get_stats", "get_preview", "adjust", "set_crop", "estimate_tilt", "list_looks", "set_look", "adjust_colors", "set_color_point", "set_tone_curve", "set_lens_correction", "set_hdr_output", "reset_settings", "solve_exposure", "undo", "recent_operations"])
         XCTAssertEqual(surface.descriptors.first { $0.name == "adjust" }?.effect, .modify)
     }
 
@@ -497,6 +497,29 @@ final class RawgenzoToolsSampleTests: XCTestCase {
         _ = try json(surface.call("adjust_colors", arguments: ["photos": [.string(id)], "reset": true], as: ai))
         XCTAssertNil(try workspace.photo(id).settings.colorAdjust, "全部 0 なら項目ごと消す")
         XCTAssertTrue(surface.call("adjust_colors", arguments: ["photos": [.string(id)]], as: ai).isError)
+        for _ in 0..<3 { XCTAssertFalse(surface.call("undo", as: ai).isError) }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: sidecar.path))
+    }
+
+    /// set_tone_curve: 形・点・彩度の連動を指定し、書いていないチャンネルは保つ。undo で戻る
+    func testSetToneCurve() throws {
+        var r = try json(surface.call("set_tone_curve", arguments: ["photos": [.string(id)], "preset": "medium"], as: ai))
+        XCTAssertEqual(r["results"]?.arrayValue?.first?["tone_curve"]?["preset"], "medium")
+        r = try json(surface.call("set_tone_curve", arguments: ["photos": [.string(id)], "curves": [
+            ["channel": "blue", "points": [[0, 20], [128, 120]]],
+        ], "saturation_link": 40], as: ai))
+        let c = try XCTUnwrap(workspace.photo(id).settings.toneCurve)
+        XCTAssertEqual(c.luma, ToneCurvePreset.medium.points, "書いていないチャンネルは保つ")
+        XCTAssertEqual(c.blue.count, 3, "255 の端を補う")
+        XCTAssertEqual(c.blue[0].y, 20.0 / 255, accuracy: 1e-9)
+        XCTAssertEqual(c.saturationLink, 0.4, accuracy: 1e-9)
+        XCTAssertEqual(r["results"]?.arrayValue?.first?["tone_curve"]?["blue"]?.arrayValue?.count, 3)
+        XCTAssertTrue(surface.call("set_tone_curve", arguments: ["photos": [.string(id)]], as: ai).isError)
+        XCTAssertTrue(surface.call("set_tone_curve", arguments: ["photos": [.string(id)], "preset": "weak",
+                                                                  "curves": [["channel": "luma", "points": [[0, 0], [255, 255]]]]],
+                                   as: ai).isError)
+        _ = try json(surface.call("set_tone_curve", arguments: ["photos": [.string(id)], "reset": true], as: ai))
+        XCTAssertNil(try workspace.photo(id).settings.toneCurve, "全部戻したら項目ごと消す")
         for _ in 0..<3 { XCTAssertFalse(surface.call("undo", as: ai).isError) }
         XCTAssertFalse(FileManager.default.fileExists(atPath: sidecar.path))
     }
