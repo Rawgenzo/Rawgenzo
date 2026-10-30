@@ -41,7 +41,7 @@ public enum PreviewOverlay {
     /// - marks: 番号付きの線
     public static func draw(on image: CIImage, frame: CGRect?, guides: [CompositionGuide] = [],
                             guideArea: CGRect? = nil, options: GuideOptions = GuideOptions(),
-                            marks: [Mark] = []) throws -> CIImage {
+                            marks: [Mark] = [], grid: Bool = false) throws -> CIImage {
         let extent = image.extent.integral
         let w = Int(extent.width), h = Int(extent.height)
         guard w > 0, h > 0, let source = context.createCGImage(image, from: extent),
@@ -88,6 +88,38 @@ public enum PreviewOverlay {
                 }
             }
         }
+        // 座標の目盛り(10% ごと。0.5 は少し太く)。AI が写真の中の位置を比率で読むため(色別補正の色を拾う位置など)
+        if grid {
+            let labelFont = CTFontCreateWithName("Helvetica" as CFString, max(10, CGFloat(max(w, h)) / 70), nil)
+            for k in 1..<10 {
+                let t = CGFloat(k) / 10
+                let lineWidth = (k == 5 ? 1.6 : 0.8) * line / 2
+                for (a, b) in [(CGPoint(x: t * CGFloat(w), y: 0), CGPoint(x: t * CGFloat(w), y: CGFloat(h))),
+                               (CGPoint(x: 0, y: (1 - t) * CGFloat(h)), CGPoint(x: CGFloat(w), y: (1 - t) * CGFloat(h)))] {
+                    for (color, extra) in [(CGColor(gray: 0, alpha: 0.35), lineWidth), (CGColor(gray: 1, alpha: 0.55), 0)] {
+                        ctx.setStrokeColor(color); ctx.setLineWidth(lineWidth + extra)
+                        ctx.move(to: a); ctx.addLine(to: b); ctx.strokePath()
+                    }
+                }
+                let label = String(format: "%.1f", Double(t))
+                for (pos, isX) in [(CGPoint(x: t * CGFloat(w) + 3, y: CGFloat(h) - 14), true),
+                                   (CGPoint(x: 3, y: (1 - t) * CGFloat(h) + 3), false)] {
+                    _ = isX
+                    let text = NSAttributedString(string: label, attributes: [
+                        NSAttributedString.Key(kCTFontAttributeName as String): labelFont,
+                        NSAttributedString.Key(kCTForegroundColorAttributeName as String): CGColor(gray: 1, alpha: 0.95),
+                    ])
+                    let ctLine = CTLineCreateWithAttributedString(text)
+                    ctx.textPosition = .zero
+                    let bounds = CTLineGetImageBounds(ctLine, ctx)
+                    ctx.setFillColor(CGColor(gray: 0, alpha: 0.5))
+                    ctx.fill(CGRect(x: pos.x - 2, y: pos.y - 2, width: bounds.width + 4, height: bounds.height + 4))
+                    ctx.textPosition = CGPoint(x: pos.x - bounds.minX, y: pos.y - bounds.minY)
+                    CTLineDraw(ctLine, ctx)
+                }
+            }
+        }
+
         // 番号付きの線: 線を描いてから、端に番号の札を置く(札は画像の中に収める)
         let fontSize = max(11, CGFloat(max(w, h)) / 60)
         let font = CTFontCreateWithName("Helvetica-Bold" as CFString, fontSize, nil)

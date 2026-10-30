@@ -15,6 +15,7 @@ struct ColorAdjustSection: View {
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
+                .modifier(AgentHighlight(isOn: model.agentHighlights.contains("colorAdjust")))
                 if !model.colorPanelShowsPoints {
                     EyedropperButton(isOn: model.colorPick == .band) {
                         model.colorPick = model.colorPick == .band ? nil : .band

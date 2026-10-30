@@ -564,6 +564,7 @@ final class EditorModel: ObservableObject {
         if oldLens?.distortion != newLens?.distortion { changed.insert("lens.distortion") }
         if oldLens?.chromaticAberration != newLens?.chromaticAberration { changed.insert("lens.chromaticAberration") }
         if settings.hdr.extendedOutput != new.hdr.extendedOutput { changed.insert("hdr.extendedOutput") }
+        if settings.colorAdjust != new.colorAdjust { changed.insert("colorAdjust") }
         photo.settings = new
         settings = new
         highlight(changed)
@@ -612,6 +613,7 @@ final class EditorModel: ObservableObject {
         case "set_lens_correction": what = "\(task)レンズ補正を変更しました"
         case "set_hdr_output": what = "\(task)HDR 出力を変更しました"
         case "reset_settings": what = "\(task)設定を初期値に戻しました"
+        case "adjust_colors", "set_color_point": what = "\(task)色別補正を変更しました"
         // 文言を登録していない道具は、道具の名前だけを出す。以前は「写真を変更しました」にしていて、
         // 読むだけの get_app_state でもそう出た(オーナーの指摘)。登録を忘れても「変更した」と誤って言わないようにする
         default: what = "\(task) \(r.tool) を使いました"

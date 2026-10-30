@@ -26,6 +26,8 @@ public enum RawgenzoTools {
         - 「シネマ調」「フィルムっぽく」「モノクロに」のような雰囲気の指示は、まず list_looks でルック(色の作りのひな形)を確かめ、
           合うものがあれば set_look で当てる。足りない分だけ adjust で整える。get_preview の look で、保存せずに試せる
         - レンズ補正は set_lens_correction、HDR ディスプレイ向けの出力は set_hdr_output、全部を初期値に戻すのは reset_settings
+        - 特定の色だけを変えるのは、色の帯全体なら adjust_colors、写真の中の特定の物(淡い花びらなど)なら set_color_point。
+          set_color_point は位置で頼む: get_preview(grid: true)で変えたい所と変えたくない所の位置を読み、強さは target_chroma で渡す
         - 値の範囲・効く条件は adjust の各項目の説明にある。例えばシャープネスは等倍で描くときだけ効き、
           縮小したプレビューや統計には表れない
         統計の値はすべて出力の sRGB(見た目に近い値)で 0〜1。
@@ -168,6 +170,7 @@ public enum RawgenzoTools {
                 + "その画像のピクセル座標を幅・高さで割った値が、set_crop の座標になる。"
                 + "region を渡すと、その範囲だけを高い解像度で返す(縁の傾き・ピントの確認に。全体を大きく出すよりトークンが少ない)。"
                 + "show_crop_frame は切り抜く前の全体に今の枠を描き(枠の外は暗く)、guide は構図ガイドを枠の中(枠を描かないときは画像全体)に描く。"
+                + "grid は 10% ごとの目盛り、color_mask は色別補正の効く所だけを色で描く(ほかは灰色。長辺 512 程度で足りる)。"
                 + "結果の文字に、等倍に対する倍率が付く",
             input: .object([
                 .init("photo", photoID),
@@ -184,6 +187,11 @@ public enum RawgenzoTools {
                 .init("show_crop_frame", .boolean("切り抜く前の全体に今の切り抜き枠を描くか(既定 false。true なら ignore_crop も true として扱う)")),
                 .init("guide", .string("重ねる構図ガイド: " + CompositionGuides.all.map { "\($0.id)(\($0.displayName))" }.joined(separator: "・"),
                                        oneOf: CompositionGuides.all.map(\.id))),
+                .init("grid", .boolean()),
+                .init("color_mask", .object([
+                    .init("band", .string(oneOf: ColorBand.allCases.map(\.rawValue))),
+                    .init("point", .integer(minimum: 0)),
+                ], description: "band か point(色別補正の index)")),
             ], required: ["photo"]),
             effect: .read)) { args, _ in
             let photo = try ws.photo(args["photo"]!.stringValue!)
@@ -195,8 +203,22 @@ public enum RawgenzoTools {
             let region = args["region"]
             let showFrame = args["show_crop_frame"]?.boolValue == true
             let guide = args["guide"]?.stringValue.flatMap(CompositionGuides.guide(id:))
-            if region != nil, showFrame || guide != nil {
-                return .error("region は show_crop_frame・guide と一緒には使えません")
+            let grid = args["grid"]?.boolValue == true
+            if region != nil, showFrame || guide != nil || grid {
+                return .error("region は show_crop_frame・guide・grid と一緒には使えません")
+            }
+            var mask: ColorAdjustMask?
+            if let m = args["color_mask"] {
+                if let b = m["band"]?.stringValue.flatMap(ColorBand.init(rawValue:)) {
+                    mask = .band(b)
+                } else if let i = m["point"]?.intValue {
+                    guard (settings.colorAdjust?.points.indices ?? 0..<0).contains(i) else {
+                        return .error("拾った色の \(i) 番はありません(get_photo の color_adjust.points を見てください)")
+                    }
+                    mask = .point(i)
+                } else {
+                    return .error("color_mask には band か point を書いてください")
+                }
             }
             let frame = settings.crop
             var notes: [String] = []
@@ -217,13 +239,13 @@ public enum RawgenzoTools {
                 }
             }
             var image = try ws.engine.pipeline.processFitting(photo, settings: settings,
-                                                              longEdge: args["long_edge"]?.intValue ?? 768)
+                                                              longEdge: args["long_edge"]?.intValue ?? 768, colorAdjustMask: mask)
             let size = photo.source.nativeSize
             let shown = settings.crop ?? .full
             let scale = Double(image.extent.width) / (Double(size.width) * shown.width)
-            if showFrame || guide != nil {
+            if showFrame || guide != nil || grid {
                 let f = showFrame ? frame.map { CGRect(x: $0.x, y: $0.y, width: $0.width, height: $0.height) } : nil
-                image = try PreviewOverlay.draw(on: image, frame: f, guides: guide.map { [$0] } ?? [])
+                image = try PreviewOverlay.draw(on: image, frame: f, guides: guide.map { [$0] } ?? [], grid: grid)
             }
             let jpeg = try PreviewEncoder.jpeg(image, quality: 0.75)
             var content: [ToolContent] = [
@@ -297,6 +319,7 @@ public enum RawgenzoTools {
         registerCrop(on: surface, workspace: ws)
         registerTilt(on: surface, workspace: ws)
         registerLook(on: surface, workspace: ws)
+        registerColorAdjust(on: surface, workspace: ws)
         registerOptions(on: surface, workspace: ws)
     }
 
@@ -962,6 +985,7 @@ public enum RawgenzoTools {
             .map { .string($0.id) })
         o["crop"] = cropJSON(s.crop)
         o["look"] = lookJSON(ws, s.look)
+        o["color_adjust"] = colorAdjustJSON(s.colorAdjust)
         o["lens_correction"] = lensJSON(photo, s)
         o["hdr_output"] = .bool(s.hdr.extendedOutput)
         return o

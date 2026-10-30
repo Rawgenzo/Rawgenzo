@@ -126,14 +126,16 @@ extension DevelopPipeline {
     /// 長辺が longEdge ピクセル(以下)になるよう、縮小して現像する。クロップ後の大きさで合わせる。
     /// 縮小して描くのでシャープネスは効かない(等倍のときだけ効くデコーダの性質)。
     /// RAWSource に触るので、アプリでは描画キューから呼ぶこと
-    public func processFitting(_ photo: Photo, settings: DevelopSettings, longEdge: Int) throws -> CIImage {
+    /// - colorAdjustMask: 色別補正の「効く場所を表示」(AI の get_preview の color_mask)
+    public func processFitting(_ photo: Photo, settings: DevelopSettings, longEdge: Int,
+                               colorAdjustMask: ColorAdjustMask? = nil) throws -> CIImage {
         // まず等倍の大きさを求める(CIImage は描くまで計算しないので、大きさを知るだけなら軽い)
-        let full = try process(photo, settings: settings, options: RenderOptions(scale: 1))
+        let full = try process(photo, settings: settings, options: RenderOptions(scale: 1, colorAdjustMask: colorAdjustMask))
         let fullLong = max(full.extent.width, full.extent.height)
         guard fullLong > 0 else { throw RAWError.renderFailed("現像結果が空です") }
         let scale = min(1, Double(longEdge) / Double(fullLong))
         if scale >= 1 { return full }
-        var image = try process(photo, settings: settings, options: RenderOptions(scale: scale))
+        var image = try process(photo, settings: settings, options: RenderOptions(scale: scale, colorAdjustMask: colorAdjustMask))
         // デコーダの縮小は端数で 1〜2 ピクセルずれることがあるので、超えた分だけ縮める
         let long = max(image.extent.width, image.extent.height)
         if long > CGFloat(longEdge) {

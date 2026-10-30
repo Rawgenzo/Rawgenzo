@@ -1692,6 +1692,50 @@ final class ColorAdjustTests: XCTestCase {
         XCTAssertEqual(old.lightnessMin, 0); XCTAssertEqual(old.lightnessMax, 100)
     }
 
+    /// 変えたい色と変えたくない色から範囲を決める(AI の set_color_point)。DSC01032 で測った色
+    func testFitSeparatesPetalsFromSkyAndBranch() throws {
+        let petals = [SIMD3<Double>(232, 230, 233), [189, 183, 192], [172, 158, 157], [224, 222, 228]]
+            .map { ColorSampler.Picked(rgb: $0 / 255) }
+        let sky = ColorSampler.Picked(rgb: SIMD3(149, 161, 196) / 255)
+        let branch = ColorSampler.Picked(rgb: SIMD3(95, 80, 82) / 255)   // 暗く、色相は花びらに近い
+        let r = try XCTUnwrap(ColorPointAdjust.fitted(includes: petals, excludes: [sky, branch]))
+        XCTAssertTrue(r.unresolved.isEmpty, "空と枝は外せる: \(r.unresolved) \(r.point)")
+        func w(_ c: ColorSampler.Picked) -> Double {
+            M.pointWeight(r.point, l: c.lightness / 100, c: c.chroma / 100 * M.chromaReference, h: c.hue)
+        }
+        XCTAssertLessThan(w(sky), 0.05); XCTAssertLessThan(w(branch), 0.05)
+        let weakSet = Set(r.weakIncludes.map(\.index))
+        // 真っ白に近い花びら(濃さ 2)は効きが弱いことがある。それ以外は半分以上効く
+        for (i, p) in petals.enumerated() where p.chroma > 4 {
+            XCTAssertFalse(weakSet.contains(i), "花びら \(i)(濃さ \(p.chroma))に効く")
+        }
+    }
+
+    /// 目標の濃さ: 花びらの濃さの平均が目標に届く「色を足す」の強さを探す
+    func testSolvedAddReachesTargetChroma() throws {
+        let petals = [SIMD3<Double>(189, 183, 192), [172, 158, 157], [224, 222, 228]].map { ColorSampler.Picked(rgb: $0 / 255) }
+        var base = try XCTUnwrap(ColorPointAdjust.fitted(includes: petals)).point
+        base.addHue = 355
+        let r = base.solvedAdd(includes: petals, targetChroma: 15)
+        XCTAssertTrue(r.met)
+        XCTAssertEqual(r.achieved, 15, accuracy: 1)
+        XCTAssertGreaterThan(r.point.add, 0)
+        let impossible = base.solvedAdd(includes: petals, targetChroma: 95)
+        XCTAssertFalse(impossible.met)
+        XCTAssertEqual(impossible.point.add, 100)
+    }
+
+    /// 背景が被写体とほとんど同じ色なら、外せないと返す(DSC01275 の壁)
+    func testFitReportsInseparableBackground() throws {
+        let petals = [SIMD3<Double>(168, 167, 157), [199, 199, 191], [165, 155, 142]].map { ColorSampler.Picked(rgb: $0 / 255) }
+        // 壁の暗い所は明るさで外せるが、花びらと同じくらい明るい所は外せない(色相・淡さ・明るさがどれも重なる)
+        let darkWall = ColorSampler.Picked(rgb: SIMD3(139, 135, 124) / 255)
+        let brightWall = ColorSampler.Picked(rgb: SIMD3(182, 180, 170) / 255)
+        let r = try XCTUnwrap(ColorPointAdjust.fitted(includes: petals, excludes: [darkWall, brightWall]))
+        XCTAssertEqual(r.unresolved.map(\.index), [1], "明るい壁は外せない: \(r.point)")
+        XCTAssertNil(ColorPointAdjust.fitted(includes: []))
+    }
+
     /// 効く場所の表示: 拾った色はそのまま、範囲の外は灰色
     func testMaskShowsOnlyAffectedColors() {
         let picked = M.lch(M.oklab(palePink))

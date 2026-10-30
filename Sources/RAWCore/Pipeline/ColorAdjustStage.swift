@@ -249,3 +249,117 @@ public struct ColorAdjustStage: DevelopStage {
         }
     }
 }
+
+extension ColorPointAdjust {
+    /// 範囲を決めた結果
+    public struct FitResult: Sendable {
+        public var point: ColorPointAdjust
+        /// 外せなかった「変えたくない色」の番号(excludes の並び)と、残った効き方(0...1)
+        public var unresolved: [(index: Int, weight: Double)]
+        /// 効き方が半分に届かない「変えたい色」の番号(includes の並び)。色がほとんど無い(真っ白に近い)色など
+        public var weakIncludes: [(index: Int, weight: Double)]
+    }
+
+    /// 変えたい色(includes)が全部入り、変えたくない色(excludes)が外れるように、範囲を決める。
+    /// AI が範囲の値を試し続けないための、目標で指示する計算(solve_exposure と同じ考え方)。
+    /// 中心は変えたい色の平均。範囲は変えたい色が全部入る大きさにゆとりを足して始め、変えたくない色が入っていれば、
+    /// その色と変えたい色がいちばん離れている軸(色相・淡さ・明るさ)で範囲を狭める。
+    /// 補正の値(色を足すなど)は base から引き継ぐ
+    public static func fitted(includes: [ColorSampler.Picked], excludes: [ColorSampler.Picked] = [],
+                              base: ColorPointAdjust? = nil) -> FitResult? {
+        guard !includes.isEmpty else { return nil }
+        // 色相は円の上の平均
+        let sx = includes.map { cos($0.hue * .pi / 180) * max($0.chroma, 1) }.reduce(0, +)
+        let sy = includes.map { sin($0.hue * .pi / 180) * max($0.chroma, 1) }.reduce(0, +)
+        var center = atan2(sy, sx) * 180 / .pi
+        if center < 0 { center += 360 }
+        let hueSpread = includes.map { abs(ColorAdjustMath.hueDifference($0.hue, center)) }.max() ?? 0
+        let chromas = includes.map(\.chroma), lights = includes.map(\.lightness)
+
+        var p = base ?? ColorPointAdjust(hue: center, chroma: 0)
+        p.hue = center
+        p.chroma = chromas.reduce(0, +) / Double(chromas.count)
+        p.lightness = lights.reduce(0, +) / Double(lights.count)
+        p.hueWidth = min(max(hueSpread + 5, ColorPointAdjust.hueWidthRange.lowerBound), ColorPointAdjust.hueWidthRange.upperBound)
+        p.chromaMin = max(0, (chromas.min() ?? 0) - 4)
+        p.chromaMax = min(100, (chromas.max() ?? 100) + 4)
+        p.lightnessMin = max(0, (lights.min() ?? 0) - 6)
+        p.lightnessMax = min(100, (lights.max() ?? 100) + 6)
+        p.softness = base?.softness ?? 30
+
+        func weight(_ c: ColorSampler.Picked, _ q: ColorPointAdjust) -> Double {
+            ColorAdjustMath.pointWeight(q, l: c.lightness / 100, c: c.chroma / 100 * ColorAdjustMath.chromaReference, h: c.hue)
+        }
+        // 変えたくない色を 1 つずつ外す。狭めるのは、変えたい色が全部入ったままでいられる範囲まで
+        for _ in 0..<3 {
+            var changed = false
+            for e in excludes where weight(e, p) > 0.05 {
+                let s = p.softness / 100
+                // 軸ごとに「どこまで狭めれば外れるか」と、そのとき変えたい色が入ったままか
+                var options: [(gap: Double, apply: (inout ColorPointAdjust) -> Void)] = []
+                let dh = abs(ColorAdjustMath.hueDifference(e.hue, center))
+                let width = dh / (1 + s)
+                if width >= hueSpread + 1, max(2, width * s) <= dh - width {
+                    options.append(((dh - hueSpread) / 60, { $0.hueWidth = max(ColorPointAdjust.hueWidthRange.lowerBound, width) }))
+                }
+                let featherC = max(1, 20 * s)
+                if e.chroma > (chromas.max() ?? 0) + featherC {
+                    options.append(((e.chroma - (chromas.max() ?? 0)) / 100, { $0.chromaMax = e.chroma - featherC }))
+                } else if e.chroma < (chromas.min() ?? 0) - featherC {
+                    options.append((((chromas.min() ?? 0) - e.chroma) / 100, { $0.chromaMin = e.chroma + featherC }))
+                }
+                let featherL = max(1, 15 * s)
+                if e.lightness > (lights.max() ?? 0) + featherL {
+                    options.append(((e.lightness - (lights.max() ?? 0)) / 100, { $0.lightnessMax = e.lightness - featherL }))
+                } else if e.lightness < (lights.min() ?? 0) - featherL {
+                    options.append((((lights.min() ?? 0) - e.lightness) / 100, { $0.lightnessMin = e.lightness + featherL }))
+                }
+                if let best = options.max(by: { $0.gap < $1.gap }) {
+                    best.apply(&p)
+                    changed = true
+                }
+            }
+            if !changed {
+                // どの軸でも外せないときは、端のなめらかさを小さくしてもう一度だけ試す
+                if p.softness > 10, excludes.contains(where: { weight($0, p) > 0.05 }) { p.softness = 10; continue }
+                break
+            }
+        }
+        let unresolved = excludes.enumerated().compactMap { i, e -> (Int, Double)? in
+            let w = weight(e, p)
+            return w > 0.05 ? (i, w) : nil
+        }
+        let weak = includes.enumerated().compactMap { i, c -> (Int, Double)? in
+            let w = weight(c, p)
+            return w < 0.5 ? (i, w) : nil
+        }
+        return FitResult(point: p, unresolved: unresolved, weakIncludes: weak)
+    }
+}
+
+extension ColorPointAdjust {
+    /// 変えたい色の濃さの平均が target(0...100)になる「色を足す」の強さを探す(二分法)。
+    /// 届かないときは 100(足せる最大)にして、届いた濃さを返す。画像は描かず、拾った色の計算だけで探す
+    public func solvedAdd(includes: [ColorSampler.Picked], targetChroma target: Double)
+        -> (point: ColorPointAdjust, achieved: Double, met: Bool) {
+        func meanChroma(_ add: Double) -> Double {
+            var q = self
+            q.add = add
+            let s = ColorAdjustSettings(points: [q])
+            let values = includes.map { ColorSampler.Picked(rgb: ColorAdjustMath.apply(s, to: $0.rgb)).chroma }
+            return values.reduce(0, +) / Double(max(values.count, 1))
+        }
+        var q = self
+        let start = meanChroma(0)
+        if target <= start { q.add = 0; return (q, start, abs(start - target) < 1) }
+        let top = meanChroma(100)
+        if target >= top { q.add = 100; return (q, top, abs(top - target) < 1) }
+        var lo = 0.0, hi = 100.0
+        for _ in 0..<20 {
+            let mid = (lo + hi) / 2
+            if meanChroma(mid) < target { lo = mid } else { hi = mid }
+        }
+        q.add = ((lo + hi) / 2).rounded()
+        return (q, meanChroma(q.add), true)
+    }
+}
