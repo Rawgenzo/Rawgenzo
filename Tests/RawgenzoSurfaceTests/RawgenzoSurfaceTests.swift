@@ -382,6 +382,18 @@ final class RawgenzoToolsSampleTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: sidecar.path))
     }
 
+    /// 色別補正も取り消しの対象(SettingsFields に入っていないと、初期値に戻した後の undo で戻らない)
+    func testUndoRestoresColorAdjust() throws {
+        let photo = try workspace.photo(id)
+        var s = photo.settings
+        s.colorAdjust = ColorAdjustSettings(bands: [.blue: ColorBandAdjust(saturation: 30)])
+        try workspace.save(photo, settings: s)
+        _ = try json(surface.call("reset_settings", arguments: ["photos": [.string(id)]], as: ai))
+        XCTAssertNil(try workspace.photo(id).settings.colorAdjust)
+        XCTAssertFalse(surface.call("undo", as: ai).isError)
+        XCTAssertEqual(try workspace.photo(id).settings.colorAdjust?.bands[.blue]?.saturation, 30)
+    }
+
     /// reset_settings: 全部を初期値に戻す。keep に挙げたものは残す。undo で戻る
     func testResetSettings() throws {
         _ = try json(surface.call("adjust", arguments: ["edits": [["photos": [.string(id)], "changes": ["exposure": 1, "temperature": 4000]]],
