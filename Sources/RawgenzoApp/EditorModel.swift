@@ -143,6 +143,7 @@ final class EditorModel: ObservableObject {
                     c.points[i].hue = picked.hue
                     c.points[i].chroma = picked.chroma
                     c.points[i].lightness = picked.lightness
+                    c.points[i].samples = [picked.sample]
                 }
                 self.colorPick = nil
             }

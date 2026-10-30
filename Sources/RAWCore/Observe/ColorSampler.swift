@@ -26,6 +26,17 @@ public enum ColorSampler {
         public init(hue: Double, chroma: Double, lightness: Double, rgb: SIMD3<Double>) {
             self.hue = hue; self.chroma = chroma; self.lightness = lightness; self.rgb = rgb
         }
+
+        /// 保存しておいた色から作る(色相・濃さ・明るさ → sRGB)
+        public init(_ s: ColorSample) {
+            let c = s.chroma / 100 * ColorAdjustMath.chromaReference
+            let r = s.hue * .pi / 180
+            let rgb = ColorAdjustMath.srgb([s.lightness / 100, c * cos(r), c * sin(r)])
+            self.init(hue: s.hue, chroma: s.chroma, lightness: s.lightness,
+                      rgb: SIMD3(min(max(rgb.x, 0), 1), min(max(rgb.y, 0), 1), min(max(rgb.z, 0), 1)))
+        }
+
+        public var sample: ColorSample { ColorSample(hue: hue, chroma: chroma, lightness: lightness) }
     }
 
     /// 拾うときの設定: 色別補正とルックを外す(切り抜き・傾きは残す。見えている画像の位置で拾うため)

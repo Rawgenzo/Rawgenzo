@@ -209,22 +209,22 @@ extension RawgenzoTools {
                 if let v = args["luminance"]?.doubleValue { point.luminance = v }
                 if let v = args["softness"]?.doubleValue { point.softness = v }
                 if let target = args["target_chroma"]?.doubleValue {
-                    let sample = includes.isEmpty
-                        ? [ColorSampler.Picked(rgb: ColorAdjustMath.srgb([point.lightness / 100,
-                                                                         point.chroma / 100 * ColorAdjustMath.chromaReference * cos(point.hue * .pi / 180),
-                                                                         point.chroma / 100 * ColorAdjustMath.chromaReference * sin(point.hue * .pi / 180)]))]
-                        : includes
+                    // 位置を渡さずに強さだけを直すときは、範囲を決めたときに拾った色で測る(最初と同じ物差し)
+                    let sample = !includes.isEmpty ? includes
+                        : !point.samples.isEmpty ? point.samples.map(ColorSampler.Picked.init)
+                        : [ColorSampler.Picked(ColorSample(hue: point.hue, chroma: point.chroma, lightness: point.lightness))]
                     let r = point.solvedAdd(includes: sample, targetChroma: target)
                     point = r.point
                     out["target"] = ["achieved": .number(round1(r.achieved)), "met": .bool(r.met)]
                     if !r.met { notes.append(String(format: "目標の濃さに届かなかった(色を足す 100 で %.1f)", r.achieved)) }
                 }
-                if !includes.isEmpty {
-                    // 変えたい所の濃さの前後(平均)。1 か所ずつは返さない
+                // 変えたい所の濃さの前後(平均)。1 か所ずつは返さない。位置を渡さなかったときは、範囲を決めたときに拾った色で測る
+                let measured = !includes.isEmpty ? includes : point.samples.map(ColorSampler.Picked.init)
+                if !measured.isEmpty {
                     let s = ColorAdjustSettings(points: [point])
-                    let beforeC = includes.map(\.chroma).reduce(0, +) / Double(includes.count)
-                    let afterC = includes.map { ColorSampler.Picked(rgb: ColorAdjustMath.apply(s, to: $0.rgb)).chroma }.reduce(0, +)
-                        / Double(includes.count)
+                    let beforeC = measured.map(\.chroma).reduce(0, +) / Double(measured.count)
+                    let afterC = measured.map { ColorSampler.Picked(rgb: ColorAdjustMath.apply(s, to: $0.rgb)).chroma }.reduce(0, +)
+                        / Double(measured.count)
                     out["chroma_of_at"] = [.number(round1(beforeC)), .number(round1(afterC))]
                 }
                 c.points[index] = point

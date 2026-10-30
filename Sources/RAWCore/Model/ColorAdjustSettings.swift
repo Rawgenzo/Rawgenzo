@@ -146,13 +146,20 @@ public struct ColorPointAdjust: Codable, Equatable, Sendable {
     /// (淡い色を拾えば淡い色だけに、明るい花びらを拾えば暗い枝には効かない)。
     /// 明るさに既定値を付けない(渡し忘れると、明るい淡い色を拾っても範囲が 25〜75 になり、その色自体に効かなくなった)
     public static func picked(hue: Double, chroma: Double, lightness: Double, name: String = "") -> ColorPointAdjust {
-        ColorPointAdjust(name: name, hue: hue, chroma: chroma,
-                         chromaMin: max(0, chroma - 20), chromaMax: min(100, chroma + 20),
-                         lightness: lightness, lightnessMin: max(0, lightness - 25), lightnessMax: min(100, lightness + 25))
+        var p = ColorPointAdjust(name: name, hue: hue, chroma: chroma,
+                                 chromaMin: max(0, chroma - 20), chromaMax: min(100, chroma + 20),
+                                 lightness: lightness, lightnessMin: max(0, lightness - 25), lightnessMax: min(100, lightness + 25))
+        p.samples = [ColorSample(hue: hue, chroma: chroma, lightness: lightness)]
+        return p
     }
 
     /// 実際に足す色の色相
     public var effectiveAddHue: Double { addHue ?? hue }
+
+    /// 範囲を決めたときに拾った色(変えたい所の色。位置ではなく色そのものなので、切り抜いても変わらない)。
+    /// 後から強さだけを目標の濃さで直すとき、最初と同じ色で測るために使う。2026-10-30 の試験で、これを持たずに
+    /// 範囲の中心の色 1 つで測ったら、「もう少し濃く」(目標 16 → 22)で色を足す強さが 59 → 56 に下がった
+    public var samples: [ColorSample] = []
 
     public var isNeutral: Bool { add == 0 && saturation == 0 && hueShift == 0 && luminance == 0 }
 
@@ -162,7 +169,7 @@ public struct ColorPointAdjust: Codable, Equatable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case name, hue, chroma, hueWidth, chromaMin, chromaMax, lightness, lightnessMin, lightnessMax
-        case softness, add, addHue, saturation, hueShift, luminance
+        case softness, add, addHue, saturation, hueShift, luminance, samples
     }
 
     public init(from decoder: Decoder) throws {
@@ -175,7 +182,28 @@ public struct ColorPointAdjust: Codable, Equatable, Sendable {
         lightness = value(.lightness, d.lightness)
         lightnessMin = value(.lightnessMin, d.lightnessMin); lightnessMax = value(.lightnessMax, d.lightnessMax)
         addHue = try? c.decodeIfPresent(Double.self, forKey: .addHue)
+        samples = (try? c.decodeIfPresent([ColorSample].self, forKey: .samples)) ?? []
         softness = value(.softness, d.softness); add = value(.add, d.add); saturation = value(.saturation, d.saturation)
         hueShift = value(.hueShift, d.hueShift); luminance = value(.luminance, d.luminance)
+    }
+}
+
+/// 拾った色 1 つ(OKLCH の色相・濃さ 0...100・明るさ 0...100)
+public struct ColorSample: Codable, Equatable, Sendable {
+    public var hue: Double
+    public var chroma: Double
+    public var lightness: Double
+
+    public init(hue: Double, chroma: Double, lightness: Double) {
+        self.hue = hue; self.chroma = chroma; self.lightness = lightness
+    }
+
+    private enum CodingKeys: String, CodingKey { case hue, chroma, lightness }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        hue = (try? c.decodeIfPresent(Double.self, forKey: .hue)) ?? 0
+        chroma = (try? c.decodeIfPresent(Double.self, forKey: .chroma)) ?? 0
+        lightness = (try? c.decodeIfPresent(Double.self, forKey: .lightness)) ?? 50
     }
 }

@@ -286,6 +286,7 @@ extension ColorPointAdjust {
         p.lightnessMin = max(0, (lights.min() ?? 0) - 6)
         p.lightnessMax = min(100, (lights.max() ?? 100) + 6)
         p.softness = base?.softness ?? 30
+        p.samples = includes.map(\.sample)
 
         func weight(_ c: ColorSampler.Picked, _ q: ColorPointAdjust) -> Double {
             ColorAdjustMath.pointWeight(q, l: c.lightness / 100, c: c.chroma / 100 * ColorAdjustMath.chromaReference, h: c.hue)

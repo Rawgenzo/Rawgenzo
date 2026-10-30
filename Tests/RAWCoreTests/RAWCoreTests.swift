@@ -1574,6 +1574,10 @@ final class ColorAdjustTests: XCTestCase {
         XCTAssertEqual(back.colorAdjust?.bands[.orange], ColorBandAdjust(hue: 12, saturation: -20, luminance: 8))
         XCTAssertNil(back.colorAdjust?.bands[.blue])
         XCTAssertEqual(back.colorAdjust?.points, s.colorAdjust?.points)
+        var withSamples = ColorPointAdjust.picked(hue: 350, chroma: 5, lightness: 85)
+        withSamples.add = 10
+        XCTAssertEqual(try JSONDecoder().decode(ColorPointAdjust.self, from: JSONEncoder().encode(withSamples)).samples,
+                       [ColorSample(hue: 350, chroma: 5, lightness: 85)], "拾った色も保存する")
         XCTAssertEqual(back.schemaVersion, 4)
     }
 

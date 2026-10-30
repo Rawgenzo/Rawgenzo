@@ -509,6 +509,18 @@ final class RawgenzoToolsSampleTests: XCTestCase {
         XCTAssertEqual(chroma.count, 2)
         if o["target"]?["met"] == true { XCTAssertEqual(chroma[1], 60, accuracy: 1.5) }
         XCTAssertEqual(try workspace.photo(id).settings.colorAdjust?.points.first?.name, "花")
+        XCTAssertEqual(try workspace.photo(id).settings.colorAdjust?.points.first?.samples.count, 2, "拾った色を保存する")
+
+        // 「もう少し濃く」: 位置を渡さずに目標の濃さだけを上げても、最初と同じ色で測るので強さは下がらない
+        // (2026-10-30 の試験で、範囲の中心の色で測って 59 → 56 に下がった)
+        let firstAdd = try XCTUnwrap(o["point"]?["add_color"]?.doubleValue)
+        let stronger = try json(surface.call("set_color_point", arguments: ["photo": .string(id), "action": "update", "index": 0,
+                                                                            "target_chroma": .number(min(100, chroma[1] + 8))], as: ai))
+        let secondAdd = try XCTUnwrap(stronger["point"]?["add_color"]?.doubleValue)
+        XCTAssertGreaterThanOrEqual(secondAdd, firstAdd, "\(stronger)")
+        let after = try XCTUnwrap(stronger["chroma_of_at"]?.arrayValue?.compactMap(\.doubleValue))
+        XCTAssertGreaterThan(after[1], chroma[1], "濃くなる")
+        XCTAssertFalse(surface.call("undo", as: ai).isError)
         XCTAssertNotNil(try json(surface.call("get_photo", arguments: ["photo": .string(id)], as: ai))["color_adjust"]?["points"])
 
         let mask = surface.call("get_preview", arguments: ["photo": .string(id), "long_edge": 256, "color_mask": ["point": 0], "grid": true], as: ai)
