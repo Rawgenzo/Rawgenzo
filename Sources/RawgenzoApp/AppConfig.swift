@@ -56,15 +56,26 @@ struct AgentPreferences: Codable, Equatable {
 /// 右側の調整パネルの表示設定
 struct InspectorPreferences: Codable, Equatable {
     /// 折りたたんでいるセクションの ID(InspectorSectionID の rawValue。保存されるので ID は変えない)
-    var collapsed: Set<String> = []
+    var collapsed: Set<String> = InspectorPreferences.collapsedByDefault
+    /// 初めの状態(collapsedByDefault)を一度当てたセクション。当てた後は、人が開け閉めした状態を保つ
+    var defaultsApplied: Set<String> = InspectorPreferences.collapsedByDefault
+
+    /// 初めは折りたたんでおくセクション(オーナーの決定、2026-10-30)。細かい調整なので、使うときだけ開く
+    static let collapsedByDefault: Set<String> = ["hsl", "detail"]
 
     init() {}
 
-    private enum CodingKeys: String, CodingKey { case collapsed }
+    private enum CodingKeys: String, CodingKey { case collapsed, defaultsApplied }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         collapsed = (try? c.decodeIfPresent(Set<String>.self, forKey: .collapsed)) ?? []
+        defaultsApplied = (try? c.decodeIfPresent(Set<String>.self, forKey: .defaultsApplied)) ?? []
+        // まだ初めの状態を当てていないセクション(古い設定ファイル・後から足したセクション)は、一度だけ折りたたむ
+        for id in Self.collapsedByDefault.subtracting(defaultsApplied) {
+            collapsed.insert(id)
+            defaultsApplied.insert(id)
+        }
     }
 }
 
