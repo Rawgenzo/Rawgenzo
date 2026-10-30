@@ -188,6 +188,9 @@ b = ['<defs>'
      f'<stop offset="1" stop-color="{hsl(PICK_H, 0.85, 0.72)}"/></linearGradient>'
      f'<linearGradient id="satRange"><stop offset="0" stop-color="{hsl(PICK_H, 0.05, 0.9)}"/>'
      f'<stop offset="1" stop-color="{hsl(PICK_H, 0.95, 0.5)}"/></linearGradient>'
+     f'<linearGradient id="lightRange"><stop offset="0" stop-color="{hsl(PICK_H, 0.2, 0.1)}"/>'
+     f'<stop offset="1" stop-color="{hsl(PICK_H, 0.2, 0.97)}"/></linearGradient>'
+     '<linearGradient id="hueFull">' + "".join(f'<stop offset="{k/12}" stop-color="{hsl(30*k)}"/>' for k in range(13)) + '</linearGradient>'
      '</defs>']
 y = 24
 b.append(header(y, "色別補正"))
@@ -241,23 +244,25 @@ y = 300
 b.append(text(16, y, "効く範囲", 11, TEXT3, 600))
 b.append(slider(y + 22, "色相の幅", "±20°", 0.33, neutral=0.0))
 b.append(range_slider(y + 66, "淡さ", "0 〜 40", SAT_LO, SAT_HI, "satRange"))
-b.append(slider(y + 110, "なめらかさ", "50", 0.5, neutral=0.5, edited=False))
+b.append(range_slider(y + 110, "明るさ", "60 〜 100", 0.60, 1.0, "lightRange"))
+b.append(slider(y + 154, "なめらかさ", "50", 0.5, neutral=0.5, edited=False))
 b.append(note(8, y + 18, 4))
 
-y = 460
+y = 504
 b.append(f'<line x1="16" y1="{y-16}" x2="{W-16}" y2="{y-16}" stroke="{LINE}"/>')
 b.append(text(16, y, "補正", 11, TEXT3, 600))
 b.append(slider(y + 22, "色を足す", "+30", 0.30, "addTrack", highlight=True))
-b.append(slider(y + 66, "彩度", "+10", 0.55))
-b.append(slider(y + 110, "色相", "0", 0.5, edited=False))
-b.append(slider(y + 154, "輝度", "0", 0.5, edited=False))
+b.append(slider(y + 66, "足す色", "350°", 350 / 360, "hueFull"))
+b.append(slider(y + 110, "彩度", "+10", 0.55))
+b.append(slider(y + 154, "色相", "0", 0.5, edited=False))
+b.append(slider(y + 198, "輝度", "0", 0.5, edited=False))
 b.append(note(8, y + 18, 5))
 
-y = 652
+y = 740
 b.append(f'<rect x="16" y="{y-11}" width="14" height="14" rx="3" fill="{ACCENT}"/>'
          f'<path d="M19 {y-4} l3 3 l6 -6" stroke="#fff" stroke-width="1.6" fill="none"/>')
 b.append(text(36, y, "効く場所を表示(ドラッグ中だけ)", 12))
-y = 672
+y = 760
 b.append(button(16, y, 120, "スポイトで拾い直す"))
 b.append(button(144, y, 140, "この色の補正を消す"))
 h_c = y + 34
