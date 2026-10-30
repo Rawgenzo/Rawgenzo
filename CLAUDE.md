@@ -49,7 +49,8 @@ swift run rawdev mcp AItrial --log AItrial/mcp-log.jsonl   # MCP サーバー(st
 ```
 Package.swift
 Sources/RAWCore/            現像エンジン。UI 非依存(SwiftUI を import しない)
-  Camera/                   CameraProfile(機種定義)、CameraRegistry、Sony/SonyA7S3Profile、Sony/SonyLensCorrection
+  Camera/                   CameraProfile(機種定義)、CameraRegistry、Sony/SonyA7S3Profile、Sony/SonyLensCorrection、
+                            Sony/SonyMakerNote(MakerNote の FocusLocation = 撮影時のフォーカス位置)
   Decode/                   RAWSource(デコーダの抽象)、CoreImageRAWSource(CIRAWFilter)
   Pipeline/                 DevelopStage、DevelopPipeline、Stages(HDRトーン・色・クロップ・ルック)、
                             ContrastStage(自前のトーンカーブ)、MetalKernels(実行時にコンパイルする GPU のカーネル)
@@ -57,13 +58,14 @@ Sources/RAWCore/            現像エンジン。UI 非依存(SwiftUI を import
   Look/                     Look、LookRegistry、BuiltInLooks、ColorCubeLook、CubeFileLook(.cube)
   Composition/              構図ガイドの幾何計算(CompositionGuide)
   Config/                   RawgenzoPaths、ExportPreferences、FileNameTemplate、SharedConfig
-  Model/                    DevelopSettings(現像パラメータ)、ParameterCatalog(数値パラメータの範囲・基準値・説明)、CropFitting(枠を回転後の画像に収める計算)、
+  Model/                    ShootingInfo(EXIF の表示名・フォーカス位置を見えている画像の位置に直す計算)、DevelopSettings(現像パラメータ)、ParameterCatalog(数値パラメータの範囲・基準値・説明)、CropFitting(枠を回転後の画像に収める計算)、
                             PreviewZoom(表示倍率の計算)、RAWMetadata、RAWError
   Observe/                  ImageStats(現像結果の数値の観測: 輝度・白飛び・ヒストグラム・8×8 区画)、
                             DevelopPipeline.processFitting(長辺を指定して縮小現像)、PreviewEncoder(縮小 JPEG)、
                             ExposureSolver(明るさ・白飛びの目標から露出とハイライト回復を二分法で探す)、
                             PreviewOverlay(AI に見せる画像に切り抜き枠・構図ガイド・番号付きの線を描く)、
-                            TiltEstimator(傾きの手がかり: 長い直線と、Vision による人物の目・肩の線)
+                            TiltEstimator(傾きの手がかり: 長い直線と、Vision による人物の目・肩の線)、
+                            Histogram(調整パネルのヒストグラム。R・G・B・明るさ 256 区間)
   Sidecar/                  SidecarStore(<RAW名>.rawgenzo.json)
   Export/                   Exporter(JPEG / HEIF / 16bit TIFF / HDR HEIF)
   Photo.swift               Photo と RAWEngine(アプリ・CLI の窓口)
@@ -95,6 +97,8 @@ Sources/RawgenzoApp/        SwiftUI アプリ
   ExportSettingsView.swift  設定の「書き出し」タブ(テンプレート編集)
   Preferences.swift         設定ウインドウ(一般タブ)、ThumbnailSize
   ThumbnailCache.swift      埋め込みプレビューからのサムネイル
+  PhotoInfoViews.swift      ヒストグラム・撮影情報の欄、フォーカス位置の印
+  ColorAdjustView.swift     色別補正の欄(8 色・拾った色)とプレビューのスポイト
   AgentLink.swift           AI の操作の受け口(LiveEditing の実装。操作面のキューからメインに移って EditorModel に触る)
 Sources/rawdev/main.swift   CLI
 Tests/RAWCoreTests/         RAWCore のテスト(1ファイル)
@@ -139,7 +143,8 @@ ARW → CameraRegistry が機種判定 → CameraProfile.makeSource → RAWSourc
 - 次の ID は保存ファイルに書かれるので**変更しない**: `CameraProfile.id`(例 `sony.ilce-7sm3`)、
   `Look.id`(`builtin.film` など、`.cube` は `cube:<ファイル名>`)、構図ガイドの `id`(`halves` `thirds` `golden`
   `silver` `spiral` `diagonal` `triangle`)、調整パネルのセクションの `InspectorSectionID`(`basic` `lens` `hdr` `color`
-  `detail` `crop` `look`。config.json の `inspector.collapsed` に折りたたみ状態として保存される)
+  `detail` `crop` `look` `hsl` `histogram` `info`。config.json の `inspector.collapsed` に折りたたみ状態として保存される。
+  初めは折りたたむセクションは `InspectorPreferences.collapsedByDefault`、一度当てたものは `inspector.defaultsApplied`)
 - 保存形式を変えるときは `schemaVersion` を上げ、古い形式の読み込みテストを足す
 
 ### 並行処理
@@ -232,6 +237,12 @@ ARW → CameraRegistry が機種判定 → CameraProfile.makeSource → RAWSourc
 - **トークンを常に意識する**(オーナーの指示)。色別補正の道具を足したとき、帯の入力の形を「値」と「足す量」の 2 回 × 8 帯で並べて
   道具の一覧が 44 KB になった。帯を 1 つずつ並べる形(edits)にして 37.6 KB。結果も、0 の値・空の項目は書かず、色は [色相, 濃さ, 明るさ]
   の 3 つの数、変えたい所の濃さは平均の前後だけ、全部の補正の詳細は返さない(get_photo で見られる)。set_color_point の結果は約 400 バイト
+- **フォーカス位置**: ソニーの MakerNote(EXIF の 0x927c。見出し "SONY DSC \0\0\0" の 12 バイトの後に IFD、オフセットはファイルの先頭から)の
+  FocusLocation(0x2027、幅・高さ・x・y)。ImageIO では取れないので TIFFReader で読む。記録はカメラの向き(横長)で、写真の向き(Orientation)
+  → 傾き補正 → 切り抜きの順に直す(FocusPointMapping)。α7S III ではゾーン AF・顔の追尾のどちらでも 1 点が入る(枠の大きさは無い)。
+  AI の get_photo にも focus_point(get_preview の画像の比率)で返す
+- **ヒストグラムは Display P3 のまま数える**。プレビューは P3 で描くので、sRGB に直して数えると sRGB の外の鮮やかな色が 255/0 に切られ、
+  白飛び・黒つぶれを多く数える。効く場所の表示(灰色の画像)の間は数えない
 - **画像に文字を描くとき、`CTLineGetImageBounds` は今の文字の位置からの範囲を返す**。`textPosition` を 0 にしてから測る
   (しないと 1 つ前の札の位置だけずれ、番号が札から離れた)
 - **「この写真」の取り違えは結果で知らせる**。1 枚の写真を指す呼び出しで、対象がアプリで開いている写真と違えば、

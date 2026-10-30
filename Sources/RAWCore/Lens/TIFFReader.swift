@@ -82,6 +82,18 @@ struct TIFFReader {
         return values
     }
 
+    /// 値の置き場所(4 バイト以内なら項目の中、それより大きければ項目が指す位置)
+    func valueOffset(_ e: Entry, size: Int) -> Int? {
+        if size * e.count <= 4 { return e.fieldOffset }
+        return u32(at: e.fieldOffset).map(Int.init)
+    }
+
+    /// 生のバイト列(MakerNote の見出しを見るため)
+    func bytes(at p: Int, count: Int) -> Data? {
+        guard p >= 0, count >= 0, p + count <= data.count else { return nil }
+        return data.subdata(in: (data.startIndex + p)..<(data.startIndex + p + count))
+    }
+
     // MARK: - バイト列
 
     private func u16(at p: Int) -> UInt16? {

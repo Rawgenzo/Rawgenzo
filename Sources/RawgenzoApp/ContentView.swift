@@ -148,6 +148,13 @@ struct ThumbnailView: View {
 struct PreviewView: View {
     @EnvironmentObject private var model: EditorModel
     @EnvironmentObject private var prefs: AppConfigStore
+
+    /// 写真の全体に重ねるフォーカス位置の印(クロップ枠の調整中・スポイト中の表示用)
+    @ViewBuilder private var focusMarkerFill: some View {
+        if prefs.config.showsFocusPoint, let p = model.displayedFocusPoint {
+            FocusMarkerFill(point: p)
+        }
+    }
     private var guides: GuideDisplay { prefs.config.guides }
     /// 拡大表示中の写真の位置(構図ガイドを重ねるため)
     @State private var imageFrame: CGRect?
@@ -170,6 +177,7 @@ struct PreviewView: View {
                                 imageAspect: photo.imageAspect,
                                 guides: guides)
                         }
+                        .overlay { focusMarkerFill }
                         .padding(24)
                 } else if model.colorPick != nil {
                     // スポイトを使っている間も「ウインドウに合わせる」に固定し、押した位置の色を拾う
@@ -177,6 +185,7 @@ struct PreviewView: View {
                         .resizable()
                         .interpolation(.high)
                         .aspectRatio(contentMode: .fit)
+                        .overlay { focusMarkerFill }
                         .overlay { ColorPickLayer() }
                         .padding(24)
                 } else {
@@ -190,6 +199,9 @@ struct PreviewView: View {
                     .overlay {
                         if guides.hasAnythingToDraw, let f = imageFrame, f.height > 0 {
                             GuideOverlay(display: guides, aspect: f.width / f.height, imageFrame: f)
+                        }
+                        if prefs.config.showsFocusPoint, let p = model.displayedFocusPoint, let f = imageFrame, f.height > 0 {
+                            FocusMarker(point: p, frame: f)
                         }
                     }
                     .clipped()
