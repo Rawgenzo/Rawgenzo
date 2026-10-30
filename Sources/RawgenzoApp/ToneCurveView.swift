@@ -191,7 +191,10 @@ private struct CurveValueField: View {
     private var shown: String { value.map(String.init) ?? "" }
 
     var body: some View {
-        TextField("", text: Binding(get: { focused ? draft : shown }, set: { draft = $0 }))
+        // 打った文字を受け取るのはフォーカスがある間だけ。フォーカスが外れると表示が今の点の値に替わり、欄がそれを送り返してくる。
+        // 受け取ると、打ちかけが別の点の値で上書きされ、確定でそれが当たった(50 と打ってほかの点をクリックしたら、
+        // 新しく選んだ点の出力 0 が元の点に当たった。2026-10-30、オーナーの確認)
+        TextField("", text: Binding(get: { focused ? draft : shown }, set: { if focused { draft = $0 } }))
             .textFieldStyle(.roundedBorder)
             .multilineTextAlignment(.center)
             .monospacedDigit()
