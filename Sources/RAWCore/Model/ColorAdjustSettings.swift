@@ -113,28 +113,46 @@ public struct ColorPointAdjust: Codable, Equatable, Sendable {
     /// 効く濃さの範囲(0...100)。淡い色だけを狙うなら上限を下げる
     public var chromaMin: Double = 0
     public var chromaMax: Double = 100
+    /// 拾った色の明るさ(OKLab の L × 100。0 = 黒、100 = 白)
+    public var lightness: Double = 50
+    /// 効く明るさの範囲(0...100)。桜の花びら(明るい)を狙うとき、同じ色相・淡さの暗い枝を外す
+    /// (2026-10-30、DSC01032 で枝が紫がかった)
+    public var lightnessMin: Double = 0
+    public var lightnessMax: Double = 100
     /// 範囲の端で効き方を弱める幅(0...100)
     public var softness: Double = 50
-    /// 色を足す(0...100)。拾った色相の方へ一定量だけ色を足す。ほとんど白の画素にも色が付く
+    /// 色を足す(0...100)。足す色の色相の方へ一定量だけ色を足す。ほとんど白の画素にも色が付く
     public var add: Double = 0
+    /// 足す色の色相(OKLCH の度)。nil = 拾った色の色相。暖かい光で花びらが黄色みを帯びた写真(DSC01275)で、
+    /// 花びらを拾ってピンクを足すため
+    public var addHue: Double? = nil
     /// 彩度・色相・輝度(−100...100)。帯の補正と同じ意味
     public var saturation: Double = 0
     public var hueShift: Double = 0
     public var luminance: Double = 0
 
     public init(name: String = "", hue: Double, chroma: Double, hueWidth: Double = 20,
-                chromaMin: Double = 0, chromaMax: Double = 100, softness: Double = 50,
-                add: Double = 0, saturation: Double = 0, hueShift: Double = 0, luminance: Double = 0) {
+                chromaMin: Double = 0, chromaMax: Double = 100,
+                lightness: Double = 50, lightnessMin: Double = 0, lightnessMax: Double = 100, softness: Double = 50,
+                add: Double = 0, addHue: Double? = nil, saturation: Double = 0, hueShift: Double = 0, luminance: Double = 0) {
         self.name = name; self.hue = hue; self.chroma = chroma; self.hueWidth = hueWidth
-        self.chromaMin = chromaMin; self.chromaMax = chromaMax; self.softness = softness
-        self.add = add; self.saturation = saturation; self.hueShift = hueShift; self.luminance = luminance
+        self.chromaMin = chromaMin; self.chromaMax = chromaMax
+        self.lightness = lightness; self.lightnessMin = lightnessMin; self.lightnessMax = lightnessMax
+        self.softness = softness; self.add = add; self.addHue = addHue
+        self.saturation = saturation; self.hueShift = hueShift; self.luminance = luminance
     }
 
-    /// 拾った色から作る。効く濃さの範囲は、拾った濃さの ±20(淡い色を拾えば淡い色だけに効く)
-    public static func picked(hue: Double, chroma: Double, name: String = "") -> ColorPointAdjust {
+    /// 拾った色から作る。効く濃さの範囲は拾った濃さの ±20、明るさの範囲は拾った明るさの ±25
+    /// (淡い色を拾えば淡い色だけに、明るい花びらを拾えば暗い枝には効かない)。
+    /// 明るさに既定値を付けない(渡し忘れると、明るい淡い色を拾っても範囲が 25〜75 になり、その色自体に効かなくなった)
+    public static func picked(hue: Double, chroma: Double, lightness: Double, name: String = "") -> ColorPointAdjust {
         ColorPointAdjust(name: name, hue: hue, chroma: chroma,
-                         chromaMin: max(0, chroma - 20), chromaMax: min(100, chroma + 20))
+                         chromaMin: max(0, chroma - 20), chromaMax: min(100, chroma + 20),
+                         lightness: lightness, lightnessMin: max(0, lightness - 25), lightnessMax: min(100, lightness + 25))
     }
+
+    /// 実際に足す色の色相
+    public var effectiveAddHue: Double { addHue ?? hue }
 
     public var isNeutral: Bool { add == 0 && saturation == 0 && hueShift == 0 && luminance == 0 }
 
@@ -143,7 +161,8 @@ public struct ColorPointAdjust: Codable, Equatable, Sendable {
     public static let signedRange: ClosedRange<Double> = -100...100
 
     private enum CodingKeys: String, CodingKey {
-        case name, hue, chroma, hueWidth, chromaMin, chromaMax, softness, add, saturation, hueShift, luminance
+        case name, hue, chroma, hueWidth, chromaMin, chromaMax, lightness, lightnessMin, lightnessMax
+        case softness, add, addHue, saturation, hueShift, luminance
     }
 
     public init(from decoder: Decoder) throws {
@@ -153,6 +172,9 @@ public struct ColorPointAdjust: Codable, Equatable, Sendable {
         name = (try? c.decodeIfPresent(String.self, forKey: .name)) ?? ""
         hue = value(.hue, d.hue); chroma = value(.chroma, d.chroma); hueWidth = value(.hueWidth, d.hueWidth)
         chromaMin = value(.chromaMin, d.chromaMin); chromaMax = value(.chromaMax, d.chromaMax)
+        lightness = value(.lightness, d.lightness)
+        lightnessMin = value(.lightnessMin, d.lightnessMin); lightnessMax = value(.lightnessMax, d.lightnessMax)
+        addHue = try? c.decodeIfPresent(Double.self, forKey: .addHue)
         softness = value(.softness, d.softness); add = value(.add, d.add); saturation = value(.saturation, d.saturation)
         hueShift = value(.hueShift, d.hueShift); luminance = value(.luminance, d.luminance)
     }

@@ -235,12 +235,20 @@ struct ColorPointsPanel: View {
                     format: "±%.0f°", onEditing: showMask)
         ColorRangeSlider("淡さ", low: binding(i, \.chromaMin), high: binding(i, \.chromaMax),
                          track: ColorAdjustColors.chromaTrack(p), onEditing: showMask)
+        ColorRangeSlider("明るさ", low: binding(i, \.lightnessMin), high: binding(i, \.lightnessMax),
+                         track: ColorAdjustColors.lightnessTrack(p), onEditing: showMask)
         ColorSlider("なめらかさ", value: binding(i, \.softness), range: ColorPointAdjust.unitRange, neutral: 50,
                     format: "%.0f", onEditing: showMask)
         Divider()
         Text("補正").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
         ColorSlider("色を足す", value: binding(i, \.add), range: ColorPointAdjust.unitRange, neutral: 0, format: "%+.0f",
                     track: ColorAdjustColors.addTrack(p), onEditing: showMask)
+        // 足す色: 初めは拾った色の色相。↶ で拾った色に戻す(暖かい光で黄色みを帯びた花びらに、ピンクを足すときなど)
+        ColorSlider("足す色", value: Binding(
+                        get: { points.indices.contains(i) ? points[i].effectiveAddHue : 0 },
+                        set: { v in update(i) { $0.addHue = abs(ColorAdjustMath.hueDifference(v, $0.hue)) < 0.5 ? nil : v } }),
+                    range: 0...360, neutral: p.hue.rounded(), format: "%.0f°",
+                    track: ColorAdjustColors.fullHueTrack, onEditing: showMask)
         ColorSlider("彩度", value: binding(i, \.saturation), range: ColorPointAdjust.signedRange, neutral: 0, format: "%+.0f",
                     onEditing: showMask)
         ColorSlider("色相", value: binding(i, \.hueShift), range: ColorPointAdjust.signedRange, neutral: 0, format: "%+.0f",
@@ -568,6 +576,13 @@ enum ColorAdjustColors {
     }
 
     static func addTrack(_ p: ColorPointAdjust) -> [Color] {
-        [oklch(l: 0.93, level: 3, hue: p.hue), oklch(l: 0.82, level: 45, hue: p.hue)]
+        [oklch(l: 0.93, level: 3, hue: p.effectiveAddHue), oklch(l: 0.82, level: 45, hue: p.effectiveAddHue)]
     }
+
+    static func lightnessTrack(_ p: ColorPointAdjust) -> [Color] {
+        [oklch(l: 0.15, level: min(p.chroma, 20), hue: p.hue), oklch(l: 0.97, level: min(p.chroma, 10), hue: p.hue)]
+    }
+
+    /// 色相の全周(0〜360°)
+    static let fullHueTrack: [Color] = stride(from: 0.0, through: 360, by: 20).map { hue($0) }
 }

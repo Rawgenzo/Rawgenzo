@@ -134,7 +134,7 @@ final class EditorModel: ObservableObject {
                 self.pickDrag = (band, key, self.settings.colorAdjust?.bands[band]?[keyPath: key] ?? 0, self.lastPickDY)
                 if self.showsColorMask { self.colorMask = .band(band) }
             case .newPoint:
-                self.updateColorAdjust { $0.points.append(.picked(hue: picked.hue, chroma: picked.chroma)) }
+                self.updateColorAdjust { $0.points.append(.picked(hue: picked.hue, chroma: picked.chroma, lightness: picked.lightness)) }
                 self.selectedPoint = max(0, (self.settings.colorAdjust?.points.count ?? 1) - 1)
                 self.colorPick = nil
             case .repick(let i):
@@ -142,6 +142,7 @@ final class EditorModel: ObservableObject {
                     guard c.points.indices.contains(i) else { return }
                     c.points[i].hue = picked.hue
                     c.points[i].chroma = picked.chroma
+                    c.points[i].lightness = picked.lightness
                 }
                 self.colorPick = nil
             }

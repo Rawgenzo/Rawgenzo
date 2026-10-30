@@ -96,8 +96,8 @@ public enum ColorAdjustMath {
 
     // MARK: 拾った色
 
-    /// 拾った色の補正が、色 (C, h) にどれだけ効くか(0...1)
-    public static func pointWeight(_ p: ColorPointAdjust, c: Double, h: Double) -> Double {
+    /// 拾った色の補正が、色 (L, C, h) にどれだけ効くか(0...1)。L は OKLab の明るさ(0...1)
+    public static func pointWeight(_ p: ColorPointAdjust, l: Double, c: Double, h: Double) -> Double {
         // 色がほとんど無い画素(真っ白・灰色)は色相が定まらないので効かせない。淡い色を狙うときも白い雲は変えない
         let defined = smoothstep(0.004, 0.012, c)
         let d = abs(hueDifference(h, p.hue))
@@ -107,7 +107,11 @@ public enum ColorAdjustMath {
         let featherC = max(1, 20 * p.softness / 100)
         let lower = p.chromaMin <= 0 ? 1 : smoothstep(p.chromaMin - featherC, p.chromaMin, level)
         let upper = p.chromaMax >= 100 ? 1 : 1 - smoothstep(p.chromaMax, p.chromaMax + featherC, level)
-        return defined * wh * lower * upper
+        let light = l * 100
+        let featherL = max(1, 15 * p.softness / 100)
+        let dark = p.lightnessMin <= 0 ? 1 : smoothstep(p.lightnessMin - featherL, p.lightnessMin, light)
+        let bright = p.lightnessMax >= 100 ? 1 : 1 - smoothstep(p.lightnessMax, p.lightnessMax + featherL, light)
+        return defined * wh * lower * upper * dark * bright
     }
 
     // MARK: 補正
@@ -117,6 +121,7 @@ public enum ColorAdjustMath {
     public static func apply(_ s: ColorAdjustSettings, to rgb: SIMD3<Double>) -> SIMD3<Double> {
         var lab = oklab(rgb)
         let (c0, h0) = lch(lab)
+        let l0 = lab.x
 
         // 8 色の帯
         if !s.bands.isEmpty {
@@ -130,10 +135,10 @@ public enum ColorAdjustMath {
         }
         // 拾った色(並びの順)
         for p in s.points where !p.isNeutral {
-            let w = pointWeight(p, c: c0, h: h0)
+            let w = pointWeight(p, l: l0, c: c0, h: h0)
             guard w > 0 else { continue }
             if p.add > 0 {
-                let rad = p.hue * .pi / 180
+                let rad = p.effectiveAddHue * .pi / 180
                 let amount = w * p.add / 100 * maxAdd
                 lab.y += amount * cos(rad); lab.z += amount * sin(rad)
             }
@@ -163,7 +168,7 @@ public enum ColorAdjustMath {
         case .band(let band):
             w = bandGate(c) * (bandWeights(hue: h).first { $0.0 == band }?.1 ?? 0)
         case .point(let i):
-            w = s.points.indices.contains(i) ? pointWeight(s.points[i], c: c, h: h) : 0
+            w = s.points.indices.contains(i) ? pointWeight(s.points[i], l: lab.x, c: c, h: h) : 0
         }
         let gray = srgb([lab.x, 0, 0])
         let out = gray + (rgb - gray) * w

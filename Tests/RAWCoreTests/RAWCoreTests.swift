@@ -1649,7 +1649,7 @@ final class ColorAdjustTests: XCTestCase {
     /// 拾った色: 淡いピンクを拾って「色を足す」と、淡いピンクだけが変わる。白と濃い赤は変わらない
     func testPointAffectsOnlyPalePink() {
         let picked = M.lch(M.oklab(palePink))
-        var p = ColorPointAdjust.picked(hue: picked.h, chroma: M.chromaLevel(picked.c))
+        var p = ColorPointAdjust.picked(hue: picked.h, chroma: M.chromaLevel(picked.c), lightness: M.oklab(palePink).x * 100)
         p.add = 60
         let s = ColorAdjustSettings(points: [p])
         let out = M.apply(s, to: palePink)
@@ -1660,10 +1660,43 @@ final class ColorAdjustTests: XCTestCase {
         XCTAssertGreaterThan(M.chromaLevel(M.lch(M.oklab(vividRed)).c), 70)
     }
 
+    /// 明るさの範囲: 明るい花びらを拾うと、同じ色相・淡さの暗い色(枝)は変わらない(DSC01032 で枝が紫がかった)
+    func testLightnessRangeExcludesDarkBranch() {
+        let lab = M.oklab(palePink)
+        let picked = M.lch(lab)
+        var p = ColorPointAdjust.picked(hue: picked.h, chroma: M.chromaLevel(picked.c), lightness: lab.x * 100)
+        p.add = 60
+        XCTAssertGreaterThan(p.lightnessMin, 50, "明るい色を拾えば、暗い側は範囲の外")
+        // 同じ色相・同じ淡さで暗い色
+        let dark = M.srgb([0.4, lab.y, lab.z])
+        let s = ColorAdjustSettings(points: [p])
+        XCTAssertLessThan(distance(M.apply(s, to: dark), dark), 1e-3)
+        XCTAssertGreaterThan(distance(M.apply(s, to: palePink), palePink), 0.02)
+    }
+
+    /// 足す色: 黄色みの花びら(暖かい光、DSC01275)を拾って、ピンクを足す
+    func testAddHueTintsTowardChosenHue() {
+        let warmWhite = SIMD3<Double>(0.78, 0.77, 0.72)
+        let lab = M.oklab(warmWhite)
+        let picked = M.lch(lab)
+        var p = ColorPointAdjust.picked(hue: picked.h, chroma: M.chromaLevel(picked.c), lightness: lab.x * 100)
+        p.add = 60
+        p.addHue = M.lch(M.oklab(palePink)).h
+        let out = M.lch(M.oklab(M.apply(ColorAdjustSettings(points: [p]), to: warmWhite)))
+        XCTAssertLessThan(abs(M.hueDifference(out.h, p.addHue!)), 40, "ピンクの方へ: \(out.h)")
+        XCTAssertGreaterThan(abs(M.hueDifference(picked.h, p.addHue!)), 90, "元は黄色み: \(picked.h)")
+        // 古いサイドカー(addHue・明るさが無い)は、拾った色相・全部の明るさのまま
+        let old = try! JSONDecoder().decode(ColorPointAdjust.self, from: Data(#"{"hue":10,"chroma":5,"add":30}"#.utf8))
+        XCTAssertNil(old.addHue)
+        XCTAssertEqual(old.effectiveAddHue, 10)
+        XCTAssertEqual(old.lightnessMin, 0); XCTAssertEqual(old.lightnessMax, 100)
+    }
+
     /// 効く場所の表示: 拾った色はそのまま、範囲の外は灰色
     func testMaskShowsOnlyAffectedColors() {
         let picked = M.lch(M.oklab(palePink))
-        let s = ColorAdjustSettings(points: [ColorPointAdjust.picked(hue: picked.h, chroma: M.chromaLevel(picked.c))])
+        let s = ColorAdjustSettings(points: [ColorPointAdjust.picked(hue: picked.h, chroma: M.chromaLevel(picked.c),
+                                                                     lightness: M.oklab(palePink).x * 100)])
         XCTAssertLessThan(distance(M.mask(.point(0), s, rgb: palePink), palePink), 1e-3)
         let green = SIMD3<Double>(0.2, 0.7, 0.2)
         XCTAssertLessThan(M.lch(M.oklab(M.mask(.point(0), s, rgb: green))).c, 0.005, "範囲の外は灰色")
@@ -1684,7 +1717,7 @@ final class ColorAdjustTests: XCTestCase {
         XCTAssertTrue(ColorSampler.sample(swatch(white), at: CGPoint(x: 0.5, y: 0.5)).isNearlyGray)
 
         var settings = DevelopSettings()
-        var p = ColorPointAdjust.picked(hue: picked.hue, chroma: picked.chroma)
+        var p = ColorPointAdjust.picked(hue: picked.hue, chroma: picked.chroma, lightness: picked.lightness)
         p.add = 60
         settings.colorAdjust = ColorAdjustSettings(points: [p])
         let out = ColorAdjustStage().apply(swatch(palePink), settings: settings, options: RenderOptions())

@@ -9,6 +9,8 @@ public enum ColorSampler {
         public var hue: Double
         /// 濃さ(0...100。ColorAdjustMath.chromaLevel)
         public var chroma: Double
+        /// 明るさ(OKLab の L × 100)
+        public var lightness: Double
         /// 拾った色(sRGB ガンマ 0...1。表示用)
         public var rgb: SIMD3<Double>
         /// 色がほとんど無い(白・灰色)。色相が定まらないので、拾っても効く場所が決まらない
@@ -52,7 +54,8 @@ public enum ColorSampler {
         }
         let mean = sum / Double(max(count, 1))
         let rgb = SIMD3(ColorAdjustMath.gamma(mean.x), ColorAdjustMath.gamma(mean.y), ColorAdjustMath.gamma(mean.z))
-        let (c, h) = ColorAdjustMath.lch(ColorAdjustMath.oklab(rgb))
-        return Picked(hue: h, chroma: ColorAdjustMath.chromaLevel(c), rgb: rgb)
+        let lab = ColorAdjustMath.oklab(rgb)
+        let (c, h) = ColorAdjustMath.lch(lab)
+        return Picked(hue: h, chroma: ColorAdjustMath.chromaLevel(c), lightness: lab.x * 100, rgb: rgb)
     }
 }
