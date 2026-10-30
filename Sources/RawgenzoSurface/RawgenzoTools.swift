@@ -207,6 +207,11 @@ public enum RawgenzoTools {
             if region != nil, showFrame || guide != nil || grid {
                 return .error("region は show_crop_frame・guide・grid と一緒には使えません")
             }
+            // 目盛りは set_color_point の位置(切り抜いた後の画像の比率)を読むためのもの。切り抜く前の全体に描くと、
+            // 読んだ位置が切り抜いた写真では別の画素を指し、黙って違う色を拾う
+            if grid, showFrame || args["ignore_crop"]?.boolValue == true {
+                return .error("grid は ignore_crop・show_crop_frame と一緒には使えません(目盛りは切り抜いた後の画像の座標)")
+            }
             var mask: ColorAdjustMask?
             if let m = args["color_mask"] {
                 if let b = m["band"]?.stringValue.flatMap(ColorBand.init(rawValue:)) {

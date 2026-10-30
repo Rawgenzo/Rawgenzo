@@ -514,6 +514,8 @@ final class RawgenzoToolsSampleTests: XCTestCase {
         let mask = surface.call("get_preview", arguments: ["photo": .string(id), "long_edge": 256, "color_mask": ["point": 0], "grid": true], as: ai)
         XCTAssertFalse(mask.isError, mask.summary)
         XCTAssertTrue(surface.call("get_preview", arguments: ["photo": .string(id), "color_mask": ["point": 5]], as: ai).isError)
+        // 目盛りは切り抜いた後の画像の座標なので、切り抜く前の全体には描かない(読んだ位置が別の画素を指すため)
+        XCTAssertTrue(surface.call("get_preview", arguments: ["photo": .string(id), "grid": true, "ignore_crop": true], as: ai).isError)
 
         let u = try json(surface.call("set_color_point", arguments: ["photo": .string(id), "action": "update", "index": 0,
                                                                      "add_color": 10, "add_hue": 350], as: ai))

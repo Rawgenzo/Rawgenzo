@@ -112,9 +112,10 @@ extension RawgenzoTools {
                                          required: ["x", "y"])
         surface.register(ToolDescriptor(
             name: "set_color_point", title: "色別補正(拾った色)",
-            description: "写真の中の特定の色だけを補正する(淡い桜の花びらだけピンクに、など)。位置は get_preview の画像に対する比率"
-                + "(grid: true の目盛りで読む)。add: at に変えたい所(同じ物の 2〜5 か所)、exclude_at に変えたくない所(空・背景など)を渡すと、"
+            description: "写真の中の特定の色だけを補正する(淡い桜の花びらだけピンクに、など)。位置は region・ignore_crop 無しの"
+                + " get_preview の画像に対する比率(grid: true の目盛りで読む)。add: at に変えたい所(同じ物の 2〜5 か所)、exclude_at に変えたくない所(空・背景など)を渡すと、"
                 + "範囲は Rawgenzo が決める(値を試し続けない)。外せない所は unresolved(色が近すぎる。人に伝える)。"
+                + "weak_includes は色が無さすぎて効きの弱い所(真っ白に近い。強さを上げても揃わない)。"
                 + "強さは target_chroma(変えたい所の濃さの目標 0〜100。淡い桜なら 12〜20)か add_color(色を足す 0〜100)。"
                 + "add_hue は足す色の色相(既定は拾った色。黄色みの白い花をピンクにするなら 350 前後)。"
                 + "update は index の補正を変える(at を渡すと範囲を決め直す)。色は [色相, 濃さ, 明るさ] で返す。"
@@ -152,6 +153,18 @@ extension RawgenzoTools {
             func pick(_ points: [CGPoint]) throws -> [ColorSampler.Picked] {
                 try points.map { try ColorSampler.pick(photo, settings: before, pipeline: ws.engine.pipeline, at: $0) }
             }
+            /// 外せなかった所・効きの弱い所を返す(add と update で同じ形)。渡された並びの番号と色だけ(位置は AI が渡したもの)
+            func report(_ fit: ColorPointAdjust.FitResult) {
+                if !fit.unresolved.isEmpty {
+                    out["unresolved"] = .array(fit.unresolved.map { ["exclude_at": .number(Double($0.index)),
+                                                                      "weight": .number(round1($0.weight * 100) / 100)] })
+                    notes.append("変えたくない所のうち \(fit.unresolved.count) か所は、変えたい所と色(色相・淡さ・明るさ)が近すぎて外せなかった。"
+                        + "色で選ぶ補正では分けられない(場所で選ぶ補正は無い)ので、人に伝える")
+                }
+                if !fit.weakIncludes.isEmpty {
+                    out["weak_includes"] = .array(fit.weakIncludes.map { .number(Double($0.index)) })
+                }
+            }
 
             switch action {
             case "clear":
@@ -176,20 +189,7 @@ extension RawgenzoTools {
                     point = fit.point
                     index = c.points.count
                     c.points.append(point)
-                    // 外せなかった所・効きの弱い所は、渡された並びの番号と色だけ返す(位置は AI が渡したもの)
-                    if !fit.unresolved.isEmpty {
-                        out["unresolved"] = .array(fit.unresolved.map { ["exclude_at": .number(Double($0.index)),
-                                                                          "color": pickedJSON(excludes[$0.index]),
-                                                                          "weight": .number(round1($0.weight * 100) / 100)] })
-                    }
-                    if !fit.weakIncludes.isEmpty {
-                        out["weak_includes"] = .array(fit.weakIncludes.map { ["at": .number(Double($0.index)),
-                                                                              "color": pickedJSON(includes[$0.index])] })
-                    }
-                    if !fit.unresolved.isEmpty {
-                        notes.append("変えたくない所のうち \(fit.unresolved.count) か所は、変えたい所と色(色相・淡さ・明るさ)が近すぎて外せなかった。"
-                            + "色で選ぶ補正では分けられない(場所で選ぶ補正は無い)ので、人に伝える")
-                    }
+                    report(fit)
                 } else {
                     guard let i = args["index"]?.intValue, c.points.indices.contains(i) else {
                         return .error("index が無いか、その番号の補正がありません(get_photo の color_adjust.points を見てください)")
@@ -198,7 +198,7 @@ extension RawgenzoTools {
                     point = c.points[i]
                     if !includes.isEmpty, let fit = ColorPointAdjust.fitted(includes: includes, excludes: excludes, base: point) {
                         point = fit.point
-                        if !fit.unresolved.isEmpty { notes.append("変えたくない所のうち \(fit.unresolved.count) か所は外せなかった") }
+                        report(fit)
                     }
                 }
                 if let v = args["name"]?.stringValue { point.name = v }
