@@ -77,7 +77,8 @@ Sources/OperationSurface/   AI などに操作を委ねる汎用の操作面(Fou
 Sources/RawgenzoSurface/    Rawgenzo の領域定義(RAWCore と OperationSurface を使う)
   RawgenzoWorkspace         作業フォルダと写真(ID = 作業フォルダの中ならファイル名、外なら RAW ファイルの絶対パス)
   RawgenzoTools             道具: get_app_state / list_photos / get_photo / get_stats / get_preview / adjust / set_crop / estimate_tilt /
-                            list_looks / set_look / set_lens_correction / set_hdr_output / reset_settings / solve_exposure
+                            list_looks / set_look / adjust_colors / set_color_point / set_lens_correction / set_hdr_output /
+                            reset_settings / solve_exposure
                             (+ undo / recent_operations)
   RawgenzoAgentHost         アプリの中でソケット(~/.Rawgenzo/agent.sock)を受け、作業フォルダごとの操作面につなぐ。
                             RawgenzoBridge(中継との決まり: 最初の通知 rawgenzo/workspace で作業フォルダを知らせる)
@@ -222,6 +223,15 @@ ARW → CameraRegistry が機種判定 → CameraProfile.makeSource → RAWSourc
   影響を受けない。DSC03425(立った 4 人、広角)で左の戸の枠 +1.0°、中央 +3.1°、右の柱 +3.6〜+6.1° と開き、長い線(右の柱)を
   選ぶと 2〜3° ずれる。縦の線の角度を左右の位置に直線で当てはめ、左右で 1.5° 以上変わるなら中央での値(+2.5°)を返して注記する。
   同じ写真で立っている 3 人の体の軸は +0.3〜+3.9°(平均 +2.1°)と、目(−4.8〜+13.2°)や肩より揃っていた
+- **色別補正(adjust_colors / set_color_point)**: オーナーの目標は「人は操作のしかたを知らなくても、AI に頼めば思った絵になる」
+  (2026-10-30)。拾った色の補正は範囲の 3 軸となめらかさを詰める込み入った操作なので、AI に値を試させず目標で指示させる。
+  set_color_point は、変えたい所(at)と変えたくない所(exclude_at)の位置から範囲を決め(`ColorPointAdjust.fitted`)、
+  目標の濃さ(target_chroma)から色を足す強さを探す(`solvedAdd`、画像を描かず拾った色の計算だけ)。外せない所は unresolved で返す
+  (DSC01275 の壁のように色が近すぎるとき。場所で選ぶ補正はオーナーの判断で作らない)。位置は get_preview の画像(切り抜いた後)の比率で、
+  get_preview の grid で目盛りを、color_mask で効く場所を見る。DSC01032 で、道具が決めた範囲で花びらだけがピンクになった(空・枝は不変)
+- **トークンを常に意識する**(オーナーの指示)。色別補正の道具を足したとき、帯の入力の形を「値」と「足す量」の 2 回 × 8 帯で並べて
+  道具の一覧が 44 KB になった。帯を 1 つずつ並べる形(edits)にして 37.6 KB。結果も、0 の値・空の項目は書かず、色は [色相, 濃さ, 明るさ]
+  の 3 つの数、変えたい所の濃さは平均の前後だけ、全部の補正の詳細は返さない(get_photo で見られる)。set_color_point の結果は約 400 バイト
 - **画像に文字を描くとき、`CTLineGetImageBounds` は今の文字の位置からの範囲を返す**。`textPosition` を 0 にしてから測る
   (しないと 1 つ前の札の位置だけずれ、番号が札から離れた)
 - **「この写真」の取り違えは結果で知らせる**。1 枚の写真を指す呼び出しで、対象がアプリで開いている写真と違えば、
@@ -351,8 +361,8 @@ README.md(利用者向けの説明)も合わせて更新する。
 - アプリ内チャット(AI をアプリに内蔵する。API キーを預かる形)は 2026-10-16 にオーナーが「一旦見送り」と判断。
   検討の内容・認証の流れ・ChatGPT 対応の考え方・再開するときの進め方は `docs/ai-in-app-chat.md`
 - AI から操作できないもの: 書き出し・写真を開く(アプリの表示を変える)。取り消しの履歴はアプリと rawdev とで別々
-- 色の詳細補正(色別補正 = 8 色の帯と、スポイトで拾った淡い色も狙える「拾った色」、カラーグレーディング)は
-  2026-10-30 に機能の規定と画面のモックまで作った(実装はまだ)。
+- 色の詳細補正のうち、A の色別補正(8 色の帯と「拾った色」)は 2026-10-30 に実装した(画面・AI の道具)。
+  B のカラーグレーディングは後回し(オーナーの判断)。HDR 出力では、色別補正を使った写真だけ明るい所が 1 で切れる(色キューブのため)。
   `docs/color-grading-design.md`
 - スライダーを初期値に戻すのは右端の「↶」ボタンだけ。Lightroom のように名前のダブルクリックで戻す操作は無い
   (2026-10-07 にオーナーが「今は見送り」と判断)

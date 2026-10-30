@@ -53,6 +53,120 @@ final class EditorModel: ObservableObject {
         }
     }
 
+    // MARK: - 色別補正(スポイト・効く場所の表示・パネルの選択)
+
+    /// スポイトで何をするか。nil = スポイトを使っていない
+    enum ColorPick: Equatable {
+        /// 8 色: 押した色に一番近い帯を選ぶ。押したまま上下にドラッグすると値を変える
+        case band
+        /// 拾った色: 押した色を中心にした補正を 1 つ足す
+        case newPoint
+        /// 拾った色: i 番目の補正の中心の色を取り直す(範囲と補正の値は保つ)
+        case repick(Int)
+    }
+
+    /// スポイトを使っている間は、クロップ枠の調整中と同じく「ウインドウに合わせる」表示に固定する
+    @Published var colorPick: ColorPick? {
+        didSet { if (oldValue == nil) != (colorPick == nil) { requestRender() } }
+    }
+    /// 「効く場所を表示」の対象(スライダーをドラッグしている間だけ入る)
+    @Published var colorMask: ColorAdjustMask? {
+        didSet { if oldValue != colorMask { requestRender() } }
+    }
+    /// 調整パネルの色別補正で見ているもの(保存しない)
+    @Published var colorPanelShowsPoints = false
+    @Published var selectedBand: ColorBand = .red
+    @Published var selectedPoint = 0
+    /// 「効く場所を表示」(ドラッグ中だけ)。既定はオン
+    @Published var showsColorMask = true
+    /// スポイトで拾えなかったときなどの知らせ(色別補正の欄に出す)
+    @Published var colorPickMessage: String?
+
+    /// プレビューを、拡大できない「ウインドウに合わせる」表示にしているか(クロップ枠の調整中・スポイト中)
+    var usesFitPreview: Bool { isCropping || colorPick != nil }
+
+    /// 色別補正の設定を変える(無ければ作る)。変えた結果が何もしない設定なら nil に戻す(サイドカーに空の項目を残さない)
+    func updateColorAdjust(_ change: (inout ColorAdjustSettings) -> Void) {
+        var c = settings.colorAdjust ?? ColorAdjustSettings()
+        change(&c)
+        let empty = c.points.isEmpty && c.bands.values.allSatisfy(\.isNeutral)
+        settings.colorAdjust = empty ? nil : c
+    }
+
+    /// プレビューの位置 point(見えている画像に対する比率、左上原点)の色を拾う。拾うのは色別補正とルックの前の色
+    func pickColor(at point: CGPoint, completion: @escaping @MainActor (ColorSampler.Picked) -> Void) {
+        guard let photo else { return }
+        let settings = self.settings
+        let job = RenderJob(photo: photo, pipeline: engine.pipeline)
+        renderQueue.async { [weak self] in
+            let picked = try? ColorSampler.pick(job.photo, settings: settings, pipeline: job.pipeline, at: point)
+            Task { @MainActor [weak self] in
+                guard self != nil, let picked else { return }
+                completion(picked)
+            }
+        }
+    }
+
+    /// スポイトで押したまま上下にドラッグして帯の値を変えるときの、始めの値
+    private var pickDrag: (band: ColorBand, key: WritableKeyPath<ColorBandAdjust, Double>, start: Double, startDY: CGFloat)?
+    private var lastPickDY: CGFloat = 0
+
+    /// プレビューを押した(point は見えている画像に対する比率、左上原点)
+    func colorPickBegan(at point: CGPoint) {
+        guard let mode = colorPick else { return }
+        colorPickMessage = nil
+        pickDrag = nil
+        lastPickDY = 0
+        pickColor(at: point) { [weak self] picked in
+            guard let self, self.colorPick == mode else { return }
+            if picked.isNearlyGray {
+                self.colorPickMessage = "押した所は色がほとんど無い(白・灰色)ので、拾えません。少しでも色のある所を押してください"
+                return
+            }
+            switch mode {
+            case .band:
+                guard let band = ColorAdjustMath.bandWeights(hue: picked.hue).max(by: { $0.1 < $1.1 })?.0 else { return }
+                self.selectedBand = band
+                // 押したまま上下にドラッグすると、彩度(option で色相、shift で輝度)を変える
+                let flags = NSEvent.modifierFlags
+                let key: WritableKeyPath<ColorBandAdjust, Double> =
+                    flags.contains(.option) ? \.hue : flags.contains(.shift) ? \.luminance : \.saturation
+                self.pickDrag = (band, key, self.settings.colorAdjust?.bands[band]?[keyPath: key] ?? 0, self.lastPickDY)
+                if self.showsColorMask { self.colorMask = .band(band) }
+            case .newPoint:
+                self.updateColorAdjust { $0.points.append(.picked(hue: picked.hue, chroma: picked.chroma, lightness: picked.lightness)) }
+                self.selectedPoint = max(0, (self.settings.colorAdjust?.points.count ?? 1) - 1)
+                self.colorPick = nil
+            case .repick(let i):
+                self.updateColorAdjust { c in
+                    guard c.points.indices.contains(i) else { return }
+                    c.points[i].hue = picked.hue
+                    c.points[i].chroma = picked.chroma
+                    c.points[i].lightness = picked.lightness
+                    c.points[i].samples = [picked.sample]
+                }
+                self.colorPick = nil
+            }
+        }
+    }
+
+    /// 押したまま動かした(dy は押した所からの縦の移動。上が負)
+    func colorPickDragged(dy: CGFloat) {
+        lastPickDY = dy
+        guard let d = pickDrag else { return }
+        let v = min(max(d.start - Double(dy - d.startDY) / 2, ColorBandAdjust.range.lowerBound), ColorBandAdjust.range.upperBound)
+        updateColorAdjust { c in
+            var a = c.bands[d.band] ?? ColorBandAdjust()
+            a[keyPath: d.key] = v.rounded()
+            c.bands[d.band] = a
+        }
+    }
+
+    func colorPickEnded() {
+        pickDrag = nil
+        colorMask = nil
+    }
+
     // MARK: - 傾き補正とクロップ枠
 
     /// 傾き補正を始める前の枠(保存しない)。傾きを変えるたびにこの枠から合わせ直すので、
@@ -92,7 +206,7 @@ final class EditorModel: ObservableObject {
     @Published private(set) var fitZoom: Double = 0
 
     /// 拡大・縮小できる状態か(クロップ枠の調整中は「ウインドウに合わせる」に固定)
-    var canZoom: Bool { photo != nil && !isCropping }
+    var canZoom: Bool { photo != nil && !usesFitPreview }
 
     func zoomToFit() { zoomMode = .fit }
     func zoomToActualSize() { zoomMode = .scale(1) }
@@ -103,7 +217,7 @@ final class EditorModel: ObservableObject {
     func reportZoom(display: Double, fit: Double) {
         if displayZoom != display { displayZoom = display }
         if fitZoom != fit { fitZoom = fit }
-        if photo != nil, !isCropping, targetRenderScale != requestedRenderScale { requestRender() }
+        if photo != nil, !usesFitPreview, targetRenderScale != requestedRenderScale { requestRender() }
     }
 
     /// 写真全体を表示するときの描画解像度(長辺 previewLongEdge ピクセル)
@@ -114,7 +228,7 @@ final class EditorModel: ObservableObject {
 
     /// 今の表示に必要な描画解像度。拡大して画面の解像度がプレビューを超えたら等倍で描く
     private var targetRenderScale: Double {
-        isCropping ? basePreviewScale
+        usesFitPreview ? basePreviewScale
                    : PreviewZoom.renderScale(zoom: displayZoom, previewScale: basePreviewScale)
     }
 
@@ -183,6 +297,9 @@ final class EditorModel: ObservableObject {
         do {
             let p = try engine.open(url)
             isCropping = false
+            colorPick = nil
+            colorMask = nil
+            selectedPoint = 0
             photo = p
             settings = p.settings
             requestRender()
@@ -201,7 +318,8 @@ final class EditorModel: ObservableObject {
         let scale = targetRenderScale
         requestedRenderScale = scale
         let options = RenderOptions(scale: scale, draft: false,
-                                    cropMode: isCropping ? .rotateOnly : .apply)
+                                    cropMode: isCropping ? .rotateOnly : .apply,
+                                    colorAdjustMask: colorMask)
         let settings = self.settings
         let job = RenderJob(photo: photo, pipeline: engine.pipeline)
         let context = ciContext
@@ -447,6 +565,7 @@ final class EditorModel: ObservableObject {
         if oldLens?.distortion != newLens?.distortion { changed.insert("lens.distortion") }
         if oldLens?.chromaticAberration != newLens?.chromaticAberration { changed.insert("lens.chromaticAberration") }
         if settings.hdr.extendedOutput != new.hdr.extendedOutput { changed.insert("hdr.extendedOutput") }
+        if settings.colorAdjust != new.colorAdjust { changed.insert("colorAdjust") }
         photo.settings = new
         settings = new
         highlight(changed)
@@ -495,6 +614,7 @@ final class EditorModel: ObservableObject {
         case "set_lens_correction": what = "\(task)レンズ補正を変更しました"
         case "set_hdr_output": what = "\(task)HDR 出力を変更しました"
         case "reset_settings": what = "\(task)設定を初期値に戻しました"
+        case "adjust_colors", "set_color_point": what = "\(task)色別補正を変更しました"
         // 文言を登録していない道具は、道具の名前だけを出す。以前は「写真を変更しました」にしていて、
         // 読むだけの get_app_state でもそう出た(オーナーの指摘)。登録を忘れても「変更した」と誤って言わないようにする
         default: what = "\(task) \(r.tool) を使いました"

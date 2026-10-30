@@ -21,9 +21,11 @@ public struct RenderOptions: Sendable {
     public var scale: Double
     public var draft: Bool
     public var cropMode: CropMode
+    /// 色別補正の「効く場所を表示」。指定すると、効く色以外を灰色にして描く(補正そのものは当てない)
+    public var colorAdjustMask: ColorAdjustMask? = nil
 
-    public init(scale: Double = 1, draft: Bool = false, cropMode: CropMode = .apply) {
-        self.scale = scale; self.draft = draft; self.cropMode = cropMode
+    public init(scale: Double = 1, draft: Bool = false, cropMode: CropMode = .apply, colorAdjustMask: ColorAdjustMask? = nil) {
+        self.scale = scale; self.draft = draft; self.cropMode = cropMode; self.colorAdjustMask = colorAdjustMask
     }
 }
 

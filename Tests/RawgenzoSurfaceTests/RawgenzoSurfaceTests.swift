@@ -21,7 +21,7 @@ final class RawgenzoToolsSchemaTests: XCTestCase {
         let ws = RawgenzoWorkspace(folder: FileManager.default.temporaryDirectory)
         let surface = RawgenzoTools.makeSurface(workspace: ws)
         XCTAssertEqual(surface.descriptors.map(\.name),
-                       ["get_app_state", "list_photos", "get_photo", "get_stats", "get_preview", "adjust", "set_crop", "estimate_tilt", "list_looks", "set_look", "set_lens_correction", "set_hdr_output", "reset_settings", "solve_exposure", "undo", "recent_operations"])
+                       ["get_app_state", "list_photos", "get_photo", "get_stats", "get_preview", "adjust", "set_crop", "estimate_tilt", "list_looks", "set_look", "adjust_colors", "set_color_point", "set_lens_correction", "set_hdr_output", "reset_settings", "solve_exposure", "undo", "recent_operations"])
         XCTAssertEqual(surface.descriptors.first { $0.name == "adjust" }?.effect, .modify)
     }
 
@@ -382,6 +382,18 @@ final class RawgenzoToolsSampleTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: sidecar.path))
     }
 
+    /// 色別補正も取り消しの対象(SettingsFields に入っていないと、初期値に戻した後の undo で戻らない)
+    func testUndoRestoresColorAdjust() throws {
+        let photo = try workspace.photo(id)
+        var s = photo.settings
+        s.colorAdjust = ColorAdjustSettings(bands: [.blue: ColorBandAdjust(saturation: 30)])
+        try workspace.save(photo, settings: s)
+        _ = try json(surface.call("reset_settings", arguments: ["photos": [.string(id)]], as: ai))
+        XCTAssertNil(try workspace.photo(id).settings.colorAdjust)
+        XCTAssertFalse(surface.call("undo", as: ai).isError)
+        XCTAssertEqual(try workspace.photo(id).settings.colorAdjust?.bands[.blue]?.saturation, 30)
+    }
+
     /// reset_settings: 全部を初期値に戻す。keep に挙げたものは残す。undo で戻る
     func testResetSettings() throws {
         _ = try json(surface.call("adjust", arguments: ["edits": [["photos": [.string(id)], "changes": ["exposure": 1, "temperature": 4000]]],
@@ -459,6 +471,76 @@ final class RawgenzoToolsSampleTests: XCTestCase {
         ] {
             XCTAssertTrue(surface.call("get_preview", arguments: bad, as: ai).isError, "\(bad)")
         }
+    }
+
+    /// adjust_colors: 帯の値を指定・足す・戻す。undo で戻る
+    func testAdjustColors() throws {
+        var r = try json(surface.call("adjust_colors", arguments: ["photos": [.string(id)], "edits": [
+            ["band": "blue", "saturation": 30], ["band": "red", "hue": 10, "luminance": -5],
+        ]], as: ai))
+        XCTAssertEqual(r["results"]?.arrayValue?.first?["color_adjust"]?["bands"]?["blue"]?["saturation"], 30)
+        r = try json(surface.call("adjust_colors", arguments: ["photos": [.string(id)], "edits": [
+            ["band": "blue", "saturation": 90, "relative": true],
+        ]], as: ai))
+        XCTAssertEqual(try workspace.photo(id).settings.colorAdjust?.bands[.blue]?.saturation, 100, "足して上限で丸める")
+        XCTAssertEqual(try workspace.photo(id).settings.colorAdjust?.bands[.red]?.hue, 10, "書いていない帯は変えない")
+        _ = try json(surface.call("adjust_colors", arguments: ["photos": [.string(id)], "reset": true], as: ai))
+        XCTAssertNil(try workspace.photo(id).settings.colorAdjust, "全部 0 なら項目ごと消す")
+        XCTAssertTrue(surface.call("adjust_colors", arguments: ["photos": [.string(id)]], as: ai).isError)
+        for _ in 0..<3 { XCTAssertFalse(surface.call("undo", as: ai).isError) }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: sidecar.path))
+    }
+
+    /// set_color_point: 位置で拾い、範囲を決め、目標の濃さに合わせる。効く場所を get_preview で見られる
+    func testSetColorPoint() throws {
+        // DSC03356(ランタナの花)の真ん中の花を変え、左の葉は変えない
+        let r = surface.call("set_color_point", arguments: [
+            "photo": .string(id), "action": "add", "name": "花",
+            "at": [["x": 0.48, "y": 0.52], ["x": 0.52, "y": 0.56]], "exclude_at": [["x": 0.08, "y": 0.45]],
+            "target_chroma": 60,
+        ], as: ai)
+        if r.isError, r.summary.contains("色がほとんど無い") { throw XCTSkip("このサンプルの真ん中に色が無い: \(r.summary)") }
+        let o = try json(r)
+        XCTAssertEqual(o["point"]?["index"], 0)
+        XCTAssertEqual(o["point_count"], 1)
+        let coverage = try XCTUnwrap(o["coverage"]?.doubleValue)
+        XCTAssertGreaterThan(coverage, 0); XCTAssertLessThan(coverage, 1)
+        let chroma = try XCTUnwrap(o["chroma_of_at"]?.arrayValue?.compactMap(\.doubleValue))
+        XCTAssertEqual(chroma.count, 2)
+        if o["target"]?["met"] == true { XCTAssertEqual(chroma[1], 60, accuracy: 1.5) }
+        XCTAssertEqual(try workspace.photo(id).settings.colorAdjust?.points.first?.name, "花")
+        XCTAssertEqual(try workspace.photo(id).settings.colorAdjust?.points.first?.samples.count, 2, "拾った色を保存する")
+
+        // 「もう少し濃く」: 位置を渡さずに目標の濃さだけを上げても、最初と同じ色で測るので強さは下がらない
+        // (2026-10-30 の試験で、範囲の中心の色で測って 59 → 56 に下がった)
+        let firstAdd = try XCTUnwrap(o["point"]?["add_color"]?.doubleValue)
+        let stronger = try json(surface.call("set_color_point", arguments: ["photo": .string(id), "action": "update", "index": 0,
+                                                                            "target_chroma": .number(min(100, chroma[1] + 8))], as: ai))
+        let secondAdd = try XCTUnwrap(stronger["point"]?["add_color"]?.doubleValue)
+        XCTAssertGreaterThanOrEqual(secondAdd, firstAdd, "\(stronger)")
+        let after = try XCTUnwrap(stronger["chroma_of_at"]?.arrayValue?.compactMap(\.doubleValue))
+        XCTAssertGreaterThan(after[1], chroma[1], "濃くなる")
+        XCTAssertFalse(surface.call("undo", as: ai).isError)
+        XCTAssertNotNil(try json(surface.call("get_photo", arguments: ["photo": .string(id)], as: ai))["color_adjust"]?["points"])
+
+        let mask = surface.call("get_preview", arguments: ["photo": .string(id), "long_edge": 256, "color_mask": ["point": 0], "grid": true], as: ai)
+        XCTAssertFalse(mask.isError, mask.summary)
+        XCTAssertTrue(surface.call("get_preview", arguments: ["photo": .string(id), "color_mask": ["point": 5]], as: ai).isError)
+        // 目盛りは切り抜いた後の画像の座標なので、切り抜く前の全体には描かない(読んだ位置が別の画素を指すため)
+        XCTAssertTrue(surface.call("get_preview", arguments: ["photo": .string(id), "grid": true, "ignore_crop": true], as: ai).isError)
+
+        let u = try json(surface.call("set_color_point", arguments: ["photo": .string(id), "action": "update", "index": 0,
+                                                                     "add_color": 10, "add_hue": 350], as: ai))
+        XCTAssertEqual(u["point"]?["add_color"], 10)
+        XCTAssertEqual(try workspace.photo(id).settings.colorAdjust?.points.first?.addHue, 350)
+        _ = try json(surface.call("set_color_point", arguments: ["photo": .string(id), "action": "update", "index": 0,
+                                                                 "add_hue": nil], as: ai))
+        XCTAssertNil(try workspace.photo(id).settings.colorAdjust?.points.first?.addHue, "null で拾った色に戻す")
+        XCTAssertTrue(surface.call("set_color_point", arguments: ["photo": .string(id), "action": "remove", "index": 3], as: ai).isError)
+        _ = try json(surface.call("set_color_point", arguments: ["photo": .string(id), "action": "remove", "index": 0], as: ai))
+        XCTAssertNil(try workspace.photo(id).settings.colorAdjust)
+        for _ in 0..<4 { XCTAssertFalse(surface.call("undo", as: ai).isError) }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: sidecar.path))
     }
 
     /// get_preview の look は仮に当てるだけで、保存しない
