@@ -90,9 +90,9 @@ struct ToneCurveSection: View {
     private var pointFields: some View {
         HStack(spacing: 6) {
             Text("入力").foregroundStyle(.secondary)
-            CurveValueField(value: selectedValue(\.x), enabled: selectedIsInner) { setSelected(x: $0) }
+            CurveValueField(value: selectedValue(\.x), target: selected, enabled: selectedIsInner) { setPoint($1, x: $0) }
             Text("出力").foregroundStyle(.secondary)
-            CurveValueField(value: selectedValue(\.y), enabled: selected != nil) { setSelected(y: $0) }
+            CurveValueField(value: selectedValue(\.y), target: selected, enabled: selected != nil) { setPoint($1, y: $0) }
             Spacer()
             Text("\(points.count) / \(ToneCurveSettings.maxPoints) 点")
                 .font(.caption).foregroundStyle(.secondary).monospacedDigit()
@@ -106,15 +106,20 @@ struct ToneCurveSection: View {
     }
 
     private func selectedValue(_ key: KeyPath<CurvePoint, Double>) -> Int? {
-        guard let i = selected, points.indices.contains(i) else { return nil }
+        selected.flatMap { value(at: $0, key) }
+    }
+
+    private func value(at i: Int, _ key: KeyPath<CurvePoint, Double>) -> Int? {
+        guard points.indices.contains(i) else { return nil }
         return Int((points[i][keyPath: key] * 255).rounded())
     }
 
-    private func setSelected(x: Int? = nil, y: Int? = nil) {
-        guard let i = selected, points.indices.contains(i) else { return }
+    /// i 番目の点を数値で変える(i は数値欄に打ち始めたときに選んでいた点。確定する前に別の点を選んでも、その点に当てない)
+    private func setPoint(_ i: Int, x: Int? = nil, y: Int? = nil) {
+        guard points.indices.contains(i) else { return }
         // 表示と同じ値なら書かない(0〜255 に丸めた値で書き直すと、プリセットの点がずれて「カスタム」になる)
-        let x = x == selectedValue(\.x) ? nil : x
-        let y = y == selectedValue(\.y) ? nil : y
+        let x = x == value(at: i, \.x) ? nil : x
+        let y = y == value(at: i, \.y) ? nil : y
         guard x != nil || y != nil else { return }
         var p = points
         if let x, i > 0, i < p.count - 1 {
@@ -143,12 +148,15 @@ struct ToneCurveSection: View {
     }
 }
 
-/// 0〜255 の数の欄。打ち終えたとき(return・欄を離れたとき)だけ値を渡す(1 文字ごとに描き直さないため)
+/// 0〜255 の数の欄。打ち終えたとき(return・欄を離れたとき)だけ値を渡す(1 文字ごとに描き直さないため)。
+/// 渡すのは、打ち始めたときに選んでいた点(target)の番号と値
 private struct CurveValueField: View {
     let value: Int?
+    let target: Int?
     let enabled: Bool
-    let commit: (Int) -> Void
+    let commit: (Int, Int) -> Void
     @State private var text = ""
+    @State private var editing: Int?
     @FocusState private var focused: Bool
 
     var body: some View {
@@ -161,12 +169,14 @@ private struct CurveValueField: View {
             .focused($focused)
             .onAppear { text = value.map(String.init) ?? "" }
             .onChange(of: value) { v in if !focused { text = v.map(String.init) ?? "" } }
-            .onChange(of: focused) { f in if !f { send() } }
+            .onChange(of: target) { _ in if !focused { text = value.map(String.init) ?? "" } }
+            .onChange(of: focused) { f in if f { editing = target } else { send() } }
             .onSubmit(send)
     }
 
     private func send() {
-        if let v = Int(text.trimmingCharacters(in: .whitespaces)) { commit(min(max(v, 0), 255)) }
+        if let i = editing ?? target, let v = Int(text.trimmingCharacters(in: .whitespaces)) { commit(min(max(v, 0), 255), i) }
+        if !focused { editing = nil }
         text = value.map(String.init) ?? ""
     }
 }
@@ -181,7 +191,9 @@ struct ToneCurveGraph: View {
 
     /// ドラッグ中の点(ドラッグを始めたときの点の並びと、動かしている点)
     @State private var drag: (start: [CurvePoint], index: Int)?
-    @FocusState private var focused: Bool
+    /// 矢印キーの受け口。SwiftUI のフォーカス(focusable・onMoveCommand)では、数値欄がフォーカスを持ったままになり、
+    /// 矢印キーが数値欄のカーソルを動かした(2026-10-30、オーナーの確認)ので、キーを直接受ける
+    @State private var keys = CurveKeyHandler()
 
     /// 点をつかめる距離(pt)と、外へ出すと点が消える距離(pt)
     private let hitRadius: CGFloat = 8
@@ -190,6 +202,8 @@ struct ToneCurveGraph: View {
     private var points: [CurvePoint] { curve[channel] }
 
     var body: some View {
+        // キーの受け口は、今のカーブ・選んだ点で動くよう描くたびに差し替える
+        let _ = keys.nudge = nudge
         GeometryReader { geo in
             let size = geo.size
             Canvas { ctx, size in draw(&ctx, size) }
@@ -198,9 +212,8 @@ struct ToneCurveGraph: View {
                     .onChanged { g in dragChanged(g, size) }
                     .onEnded { _ in drag = nil })
         }
-        .focusable()
-        .focused($focused)
-        .onMoveCommand(perform: nudge)
+        .onAppear { keys.install() }
+        .onDisappear { keys.remove() }
         .accessibilityLabel("トーンカーブ(\(channel.label))")
     }
 
@@ -217,8 +230,10 @@ struct ToneCurveGraph: View {
     // MARK: 操作
 
     private func dragChanged(_ g: DragGesture.Value, _ size: CGSize) {
-        focused = true
         if drag == nil {
+            // 数値欄の入力を確定してフォーカスを外し、矢印キーをグラフで受ける
+            NSApp.keyWindow?.makeFirstResponder(nil)
+            keys.isActive = true
             // つかむ点を決める。近くに点が無ければ、その x のカーブの上に点を足す
             let p = points
             let near = p.indices.min { distance(toView(p[$0], size), g.startLocation) < distance(toView(p[$1], size), g.startLocation) }
@@ -260,21 +275,22 @@ struct ToneCurveGraph: View {
         onChange(q)
     }
 
-    /// 矢印キーで選んだ点を 1 動かす(⇧ で 10)。端の点は上下だけ
-    private func nudge(_ direction: MoveCommandDirection) {
-        guard let i = selected, points.indices.contains(i) else { return }
-        let step = (NSEvent.modifierFlags.contains(.shift) ? 10.0 : 1.0) / 255
+    /// 矢印キーで選んだ点を 1 動かす(⇧ で 10)。端の点は上下だけ。動かす点が無ければ false(キーを渡す)
+    private func nudge(_ direction: MoveCommandDirection, _ shift: Bool) -> Bool {
+        guard let i = selected, points.indices.contains(i) else { return false }
+        let step = (shift ? 10.0 : 1.0) / 255
         var q = points
         switch direction {
         case .up: q[i].y = min(q[i].y + step, 1)
         case .down: q[i].y = max(q[i].y - step, 0)
         case .left, .right:
-            guard i > 0, i < q.count - 1 else { return }
+            guard i > 0, i < q.count - 1 else { return true }
             let x = q[i].x + (direction == .left ? -step : step)
             q[i].x = min(max(x, q[i - 1].x + ToneCurveSettings.minGap), q[i + 1].x - ToneCurveSettings.minGap)
-        @unknown default: return
+        @unknown default: return false
         }
         onChange(q)
+        return true
     }
 
     private func distance(_ a: CGPoint, _ b: CGPoint) -> CGFloat { hypot(a.x - b.x, a.y - b.y) }
@@ -356,5 +372,40 @@ struct ToneCurveGraph: View {
         case .green: return Color(red: 0.33, green: 0.85, blue: 0.4)
         case .blue: return Color(red: 0.35, green: 0.55, blue: 1)
         }
+    }
+}
+
+/// グラフの矢印キー。グラフをクリックしてから、ほかの場所をクリックするまでの間だけ受ける
+/// (サムネイル一覧などの矢印キーを取らないため。文字の入力中も受けない)
+final class CurveKeyHandler {
+    var isActive = false
+    var nudge: (MoveCommandDirection, Bool) -> Bool = { _, _ in false }
+    private var monitors: [Any] = []
+
+    func install() {
+        guard monitors.isEmpty else { return }
+        // クリックのたびにいったん外す(グラフのクリックなら、この後のドラッグの処理でまた受ける)
+        if let m = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown, handler: { [weak self] e in
+            self?.isActive = false
+            return e
+        }) { monitors.append(m) }
+        if let m = NSEvent.addLocalMonitorForEvents(matching: .keyDown, handler: { [weak self] e in
+            guard let self, self.isActive, !(e.window?.firstResponder is NSText) else { return e }
+            let direction: MoveCommandDirection
+            switch e.keyCode {
+            case 123: direction = .left
+            case 124: direction = .right
+            case 125: direction = .down
+            case 126: direction = .up
+            default: return e
+            }
+            return self.nudge(direction, e.modifierFlags.contains(.shift)) ? nil : e
+        }) { monitors.append(m) }
+    }
+
+    func remove() {
+        monitors.forEach(NSEvent.removeMonitor)
+        monitors = []
+        isActive = false
     }
 }
