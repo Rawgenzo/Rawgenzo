@@ -163,7 +163,9 @@ private struct CurveValueField: View {
     @FocusState private var focused: Bool
 
     var body: some View {
-        TextField("", text: Binding(get: { text }, set: { text = $0; dirty = true }))
+        // 欄は、こちらが入れた値をそのまま送り返してくることがある。同じ値は人が打ったものとみなさない
+        // (みなすと「打ちかけ」のままになり、点を選んでも値が出なかった)
+        TextField("", text: Binding(get: { text }, set: { if $0 != text { text = $0; dirty = true } }))
             .textFieldStyle(.roundedBorder)
             .multilineTextAlignment(.center)
             .monospacedDigit()
