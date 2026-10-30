@@ -117,6 +117,16 @@ case "info":
             let iso = m.iso.map { String($0) } ?? "-"
             print("  ISO \(iso)  F\(format(m.fNumber))  \(shutter)秒  \(format(m.focalLength, "%.0f"))mm")
             print("  撮影日時: \(m.captureDate ?? "-")")
+            let modes = [ExifLabels.exposureProgram(m.exposureProgram).map { "露出 \($0)" },
+                         m.exposureBias.map { String(format: "補正 %+.1fEV", $0) },
+                         ExifLabels.meteringMode(m.meteringMode).map { "測光 \($0)" },
+                         ExifLabels.whiteBalance(m.whiteBalance).map { "WB \($0)" },
+                         ExifLabels.flash(m.flash).map { "フラッシュ \($0)" }].compactMap { $0 }
+            if !modes.isEmpty { print("  " + modes.joined(separator: "  ")) }
+            if let f = m.focusPoint {
+                let u = FocusPointMapping.upright(f, orientation: m.orientation)
+                print(String(format: "  フォーカス位置: (%.3f, %.3f)(写真の向きで。左上が原点)", u.x, u.y))
+            }
             let photo = try engine.open(url)
             let size = photo.source.nativeSize
             print("  判定: \(photo.profile.displayName)  サイズ: \(Int(size.width))×\(Int(size.height))")

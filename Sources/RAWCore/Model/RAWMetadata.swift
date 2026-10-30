@@ -14,6 +14,23 @@ public struct RAWMetadata: Equatable, Sendable {
     public var pixelWidth: Int?
     public var pixelHeight: Int?
     public var captureDate: String?
+    // --- 撮影情報の表示用(調整パネルの「撮影情報」) ---
+    /// 露出補正(EV)
+    public var exposureBias: Double?
+    /// 露出プログラム(EXIF の ExposureProgram の値。ExifLabels.exposureProgram で名前に)
+    public var exposureProgram: Int?
+    /// 測光方式(EXIF の MeteringMode)
+    public var meteringMode: Int?
+    /// フラッシュ(EXIF の Flash。下位ビットが発光したか)
+    public var flash: Int?
+    /// ホワイトバランス(EXIF の WhiteBalance。0 = オート、1 = マニュアル)
+    public var whiteBalance: Int?
+    /// 35mm 換算の焦点距離
+    public var focalLength35mm: Double?
+    /// 写真の向き(EXIF の Orientation。1 = そのまま、6 = 90° 時計回り、8 = 90° 反時計回り、3 = 180°)
+    public var orientation: Int?
+    /// 撮影時にピントを合わせた位置(カメラの記録の向き = 横長の画像に対する比率、左上原点)。ソニーの MakerNote から読む。無ければ nil
+    public var focusPoint: CGPoint?
 
     public init(make: String? = nil, model: String? = nil, iso: Int? = nil,
                 exposureTime: Double? = nil, fNumber: Double? = nil,
@@ -35,7 +52,7 @@ public struct RAWMetadata: Equatable, Sendable {
         let tiff = props[kCGImagePropertyTIFFDictionary] as? [CFString: Any] ?? [:]
         let exif = props[kCGImagePropertyExifDictionary] as? [CFString: Any] ?? [:]
 
-        return RAWMetadata(
+        var m = RAWMetadata(
             make: clean(tiff[kCGImagePropertyTIFFMake]),
             model: clean(tiff[kCGImagePropertyTIFFModel]),
             iso: (exif[kCGImagePropertyExifISOSpeedRatings] as? [Int])?.first,
@@ -47,6 +64,15 @@ public struct RAWMetadata: Equatable, Sendable {
             pixelHeight: props[kCGImagePropertyPixelHeight] as? Int,
             captureDate: clean(exif[kCGImagePropertyExifDateTimeOriginal])
         )
+        m.exposureBias = exif[kCGImagePropertyExifExposureBiasValue] as? Double
+        m.exposureProgram = exif[kCGImagePropertyExifExposureProgram] as? Int
+        m.meteringMode = exif[kCGImagePropertyExifMeteringMode] as? Int
+        m.flash = exif[kCGImagePropertyExifFlash] as? Int
+        m.whiteBalance = exif[kCGImagePropertyExifWhiteBalance] as? Int
+        m.focalLength35mm = exif[kCGImagePropertyExifFocalLenIn35mmFilm] as? Double
+        m.orientation = props[kCGImagePropertyOrientation] as? Int
+        if m.make?.uppercased().hasPrefix("SONY") == true { m.focusPoint = SonyMakerNote.focusPoint(url: url) }
+        return m
     }
 
     /// EXIF文字列の末尾スペースやNULを除去する
