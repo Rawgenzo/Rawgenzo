@@ -229,7 +229,8 @@ extension RawgenzoTools {
                 }
                 c.points[index] = point
                 out["point"] = pointJSON(index, point)
-                out["coverage"] = .number(round1(try ColorSampler.coverage(of: point, photo, settings: before, pipeline: ws.engine.pipeline) * 1000) / 1000)
+                // 小数 3 桁に丸める(round1 の後に 1000 で割ると 0.10840000000000001 のような長い数になった)
+                out["coverage"] = .number((try ColorSampler.coverage(of: point, photo, settings: before, pipeline: ws.engine.pipeline) * 1000).rounded() / 1000)
                 if point.isNeutral { notes.append("補正の値(add_color・target_chroma など)がまだ無いので、見た目は変わらない") }
             default:
                 return .error("action は add・update・remove・clear のどれかです")
