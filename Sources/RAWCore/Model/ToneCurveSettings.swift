@@ -74,8 +74,18 @@ public struct ToneCurveSettings: Codable, Equatable, Sendable {
         }
     }
 
-    /// どのカーブも変えていない(彩度の連動は輝度のカーブが無ければ効かない)
+    /// どのカーブも画像を変えない(彩度の連動は輝度のカーブが無ければ効かない)。描くときに段を省くかの判断
     public var isNeutral: Bool { ToneCurveChannel.allCases.allSatisfy { Self.isIdentity(self[$0]) } }
+
+    /// 何も設定していない(どのチャンネルも端の 2 点だけで、彩度の連動も 0)。設定ごと消してよいかの判断。
+    /// isNeutral で消すと、変えていないカーブの上(斜めの線の上)に足した点が、足したそばから消えた
+    /// (選んでいた番号が右上の端の点を指し、点が足されずに 255・255 が出た。2026-10-30、オーナーの確認)
+    public var isEmpty: Bool {
+        ToneCurveChannel.allCases.allSatisfy { Self.isDefault(self[$0]) } && saturationLink == 0
+    }
+
+    /// 端の 2 点だけ(点を足していない)
+    public static func isDefault(_ points: [CurvePoint]) -> Bool { points == identity }
 
     public static func isIdentity(_ points: [CurvePoint]) -> Bool {
         points.allSatisfy { abs($0.x - $0.y) < 1e-9 }
@@ -115,10 +125,10 @@ public struct ToneCurveSettings: Codable, Equatable, Sendable {
         saturationLink = min(max((try? c.decodeIfPresent(Double.self, forKey: .saturationLink)) ?? nil ?? 0, 0), 1)
     }
 
-    /// 変えていないチャンネルは書かない
+    /// 点を足していないチャンネルは書かない(斜めの線の上に足した点は、画像を変えなくても残す)
     public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
-        for channel in ToneCurveChannel.allCases where !Self.isIdentity(self[channel]) {
+        for channel in ToneCurveChannel.allCases where !Self.isDefault(self[channel]) {
             try c.encode(self[channel], forKey: CodingKeys(rawValue: channel.rawValue)!)
         }
         if saturationLink != 0 { try c.encode(saturationLink, forKey: .saturationLink) }

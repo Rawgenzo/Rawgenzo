@@ -6,9 +6,9 @@ import RAWCore
 extension RawgenzoTools {
     /// 結果の JSON は短くする。変えていないチャンネルは書かない
     static func toneCurveJSON(_ c: ToneCurveSettings?) -> JSONValue {
-        guard let c, !c.isNeutral || c.saturationLink != 0 else { return .null }
+        guard let c, !c.isEmpty else { return .null }
         var o: [String: JSONValue] = [:]
-        for channel in ToneCurveChannel.allCases where !ToneCurveSettings.isIdentity(c[channel]) {
+        for channel in ToneCurveChannel.allCases where !ToneCurveSettings.isDefault(c[channel]) {
             o[channel.rawValue] = .array(c[channel].map { [.number(round1($0.x * 255)), .number(round1($0.y * 255))] })
         }
         if let preset = ToneCurvePreset.matching(c.luma), preset != .linear { o["preset"] = .string(preset.rawValue) }
@@ -61,7 +61,7 @@ extension RawgenzoTools {
                 }
                 if let link { c.saturationLink = min(max(link / 100, 0), 1) }
                 var after = before
-                after.toneCurve = c.isNeutral && c.saturationLink == 0 ? nil : c
+                after.toneCurve = c.isEmpty ? nil : c
                 if after != before { try commit(ws, ctx, photo, from: before, to: after) }
                 var row: [String: JSONValue] = ["photo": .string(id), "tone_curve": toneCurveJSON(after.toneCurve)]
                 if after == before { row["notes"] = ["変更なし"] }

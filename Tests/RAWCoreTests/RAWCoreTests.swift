@@ -1946,6 +1946,13 @@ final class ToneCurveTests: XCTestCase {
         XCTAssertEqual(b.exposure, 1)
         XCTAssertEqual(b.toneCurve?.luma, ToneCurveSettings.identity)
         XCTAssertEqual(b.toneCurve?.red, [CurvePoint(0, 0.1), CurvePoint(1, 1)])
+        // 斜めの線の上に足した点は、画像を変えなくても保存して読み戻す(設定ごと消さない)
+        var onDiagonal = ToneCurveSettings()
+        onDiagonal.luma = [CurvePoint(0, 0), CurvePoint(0.3, 0.3), CurvePoint(1, 1)]
+        XCTAssertTrue(onDiagonal.isNeutral)
+        XCTAssertFalse(onDiagonal.isEmpty)
+        XCTAssertTrue(ToneCurveSettings().isEmpty)
+        XCTAssertEqual(try JSONDecoder().decode(ToneCurveSettings.self, from: JSONEncoder().encode(onDiagonal)), onDiagonal)
         let worse = #"{"exposure": 1, "toneCurve": 5}"#.data(using: .utf8)!
         XCTAssertNil(try JSONDecoder().decode(DevelopSettings.self, from: worse).toneCurve)
     }

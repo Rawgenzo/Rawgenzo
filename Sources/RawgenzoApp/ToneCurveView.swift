@@ -19,7 +19,7 @@ struct ToneCurveSection: View {
             Picker("", selection: $channel) {
                 ForEach(ToneCurveChannel.allCases, id: \.self) { c in
                     // 変えたチャンネルには印
-                    Text(ToneCurveSettings.isIdentity(curve[c]) ? c.label : "\(c.label)•").tag(c)
+                    Text(ToneCurveSettings.isDefault(curve[c]) ? c.label : "\(c.label)•").tag(c)
                 }
             }
             .pickerStyle(.segmented)
@@ -72,7 +72,7 @@ struct ToneCurveSection: View {
                     selected = nil
                     update { $0[channel] = ToneCurveSettings.identity }
                 }
-                .disabled(ToneCurveSettings.isIdentity(points))
+                .disabled(ToneCurveSettings.isDefault(points))
                 Spacer()
                 Button("全部を戻す") {
                     selected = nil
@@ -156,11 +156,12 @@ struct ToneCurveSection: View {
             })
     }
 
-    /// カーブを変える(無ければ作る)。どのカーブも変えておらず彩度の連動も 0 なら nil に戻す(サイドカーに空の項目を残さない)
+    /// カーブを変える(無ければ作る)。何も設定していなければ nil に戻す(サイドカーに空の項目を残さない)。
+    /// 判断は isEmpty(点を足していない)で、isNeutral(画像を変えない)ではない。斜めの線の上に足した点を消さないため
     private func update(_ change: (inout ToneCurveSettings) -> Void) {
         var c = curve
         change(&c)
-        model.settings.toneCurve = c.isNeutral && c.saturationLink == 0 ? nil : c
+        model.settings.toneCurve = c.isEmpty ? nil : c
     }
 }
 
