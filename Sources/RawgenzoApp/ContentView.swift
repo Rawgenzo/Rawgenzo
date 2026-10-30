@@ -220,6 +220,21 @@ struct PreviewView: View {
                 }
                 .allowsHitTesting(false)
             }
+            if model.showsOriginal {
+                VStack {
+                    HStack {
+                        Text("編集前")
+                            .font(.callout)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(.regularMaterial, in: Capsule())
+                            .padding(12)
+                        Spacer()
+                    }
+                    Spacer()
+                }
+                .allowsHitTesting(false)
+            }
             ExportNotice()
             AgentNotice()
         }

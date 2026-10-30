@@ -48,7 +48,8 @@ final class EditorModel: ObservableObject {
     var displayedFocusPoint: CGPoint? {
         guard let photo, let p = photo.metadata.focusPoint else { return nil }
         let upright = FocusPointMapping.upright(p, orientation: photo.metadata.orientation)
-        let crop = isCropping ? settings.crop.map { CropSettings(angle: $0.angle) } : settings.crop
+        let s = showsOriginal ? photo.profile.initialSettings(for: photo.metadata) : settings
+        let crop = isCropping ? s.crop.map { CropSettings(angle: $0.angle) } : s.crop
         return FocusPointMapping.displayed(upright, crop: crop, imageAspect: photo.imageAspect)
     }
     /// preview を描いたときの RenderOptions.scale(写真の等倍に対する比)
@@ -68,6 +69,7 @@ final class EditorModel: ObservableObject {
     /// クロップ編集中は全体を表示して枠を重ねる
     @Published var isCropping = false {
         didSet {
+            if isCropping { endShowingOriginal() }
             if isCropping && settings.crop == nil { settings.crop = .full }
             requestRender()
         }
@@ -87,7 +89,10 @@ final class EditorModel: ObservableObject {
 
     /// スポイトを使っている間は、クロップ枠の調整中と同じく「ウインドウに合わせる」表示に固定する
     @Published var colorPick: ColorPick? {
-        didSet { if (oldValue == nil) != (colorPick == nil) { requestRender() } }
+        didSet {
+            if colorPick != nil { endShowingOriginal() }
+            if (oldValue == nil) != (colorPick == nil) { requestRender() }
+        }
     }
     /// 「効く場所を表示」の対象(スライダーをドラッグしている間だけ入る)
     @Published var colorMask: ColorAdjustMask? {
@@ -284,6 +289,7 @@ final class EditorModel: ObservableObject {
             Task { @MainActor in self?.noteAgentCall(caller, record) }
         }
         updateAgentHosting()
+        installOriginalKeys()
         NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil,
                                                queue: .main) { [weak self] _ in
             // 終了時にソケットを片付ける(残っても次の起動で片付くが、rawdev mcp が無駄につなぎに来ないように)
@@ -316,6 +322,7 @@ final class EditorModel: ObservableObject {
         guard let url else { photo = nil; preview = nil; return }
         do {
             let p = try engine.open(url)
+            endShowingOriginal()
             isCropping = false
             colorPick = nil
             colorMask = nil
@@ -337,10 +344,13 @@ final class EditorModel: ObservableObject {
         let gen = generation.next()
         let scale = targetRenderScale
         requestedRenderScale = scale
+        // 編集前の表示中は、すべて初期値に戻した設定で描く(設定そのものは変えない)
+        let original = showsOriginal
+        let url = photo.url
         let options = RenderOptions(scale: scale, draft: false,
                                     cropMode: isCropping ? .rotateOnly : .apply,
-                                    colorAdjustMask: colorMask)
-        let settings = self.settings
+                                    colorAdjustMask: original ? nil : colorMask)
+        let settings = original ? photo.profile.initialSettings(for: photo.metadata) : self.settings
         let job = RenderJob(photo: photo, pipeline: engine.pipeline)
         let context = ciContext
         let generation = self.generation
@@ -350,7 +360,7 @@ final class EditorModel: ObservableObject {
         var curveInput = settings
         curveInput.toneCurve = nil
         let curveKey = CurveInputKey(url: photo.url, settings: curveInput)
-        let countsCurveInput = countsHistogram && settings.toneCurve != nil && curveInputKey != curveKey
+        let countsCurveInput = !original && countsHistogram && settings.toneCurve != nil && curveInputKey != curveKey
         isRendering = true
 
         renderQueue.async { [weak self] in
@@ -386,11 +396,88 @@ final class EditorModel: ObservableObject {
                     if let histogram {
                         self.histogram = histogram
                         // カーブが無ければ、表示している画像がそのままカーブの入力
-                        if settings.toneCurve == nil { self.curveInputHistogram = histogram; self.curveInputKey = nil }
+                        if !original && settings.toneCurve == nil { self.curveInputHistogram = histogram; self.curveInputKey = nil }
                     }
                     if let curveHistogram { self.curveInputHistogram = curveHistogram; self.curveInputKey = curveKey }
+                    if original { self.originalView = (url, scale, cg, histogram) }
                 case .failure(let error): self.errorMessage = "\(error)"
                 }
+            }
+        }
+    }
+
+    // MARK: - 編集前の表示
+
+    /// 「/」を押している間、編集前(「すべて初期値に戻す」の後と同じ状態。切り抜き・傾きも外す)をプレビューに出す。
+    /// 設定・保存・取り消しには触らない。クロップ枠の調整中・スポイト中は出さない
+    @Published private(set) var showsOriginal = false
+    /// 編集前を出す直前の表示。離したとき設定と倍率が同じなら、描き直さずにこれへ戻す
+    private var editedView: (settings: DevelopSettings, scale: Double, image: CGImage, histogram: Histogram?)?
+    /// 編集前の絵。同じ写真・同じ倍率なら、2 回目からは描かずに出す
+    private var originalView: (url: URL, scale: Double, image: CGImage, histogram: Histogram?)?
+
+    func setShowsOriginal(_ on: Bool) {
+        guard on != showsOriginal else { return }
+        if on {
+            guard let photo, !usesFitPreview else { return }
+            // 描画中なら今の絵は古いので覚えない(離したときに描き直す)
+            editedView = isRendering ? nil : preview.map { (settings, previewRenderScale, $0, histogram) }
+            showsOriginal = true
+            if let o = originalView, o.url == photo.url, o.scale == targetRenderScale {
+                showCached(o.image, scale: o.scale, histogram: o.histogram)
+            } else {
+                requestRender()
+            }
+        } else {
+            showsOriginal = false
+            if let e = editedView, e.settings == settings, e.scale == targetRenderScale {
+                showCached(e.image, scale: e.scale, histogram: e.histogram)
+            } else {
+                requestRender()
+            }
+            editedView = nil
+        }
+    }
+
+    /// 写真を替えたとき・クロップ枠の調整やスポイトを始めたときに編集前の表示をやめる(描き直しは呼んだ側が行う)
+    private func endShowingOriginal() {
+        showsOriginal = false
+        editedView = nil
+    }
+
+    /// 覚えておいた絵を出す。描きかけの要求は捨てる
+    private func showCached(_ image: CGImage, scale: Double, histogram: Histogram?) {
+        _ = generation.next()
+        isRendering = false
+        requestedRenderScale = scale
+        previewRenderScale = scale
+        preview = image
+        if let histogram { self.histogram = histogram }
+    }
+
+    /// 「/」の押す・離すを受ける。押したまま別のアプリ・ウインドウへ移ると離したことが届かないので、そのときもやめる
+    private func installOriginalKeys() {
+        NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp]) { [weak self] e in
+            guard let self, e.charactersIgnoringModifiers == "/" else { return e }
+            let isUp = e.type == .keyUp, isRepeat = e.isARepeat
+            // 入力欄に打っているとき・⌘ などと一緒のときは文字・ショートカットとして渡す
+            let passes = e.window?.firstResponder is NSText
+                || !e.modifierFlags.intersection([.command, .control, .option]).isEmpty
+            let consumed = MainActor.assumeIsolated { () -> Bool in
+                if isUp {
+                    guard self.showsOriginal else { return false }
+                    self.setShowsOriginal(false)
+                    return true
+                }
+                if passes { return false }
+                if !isRepeat { self.setShowsOriginal(true) }
+                return true
+            }
+            return consumed ? nil : e
+        }
+        for name in [NSApplication.didResignActiveNotification, NSWindow.didResignKeyNotification] {
+            NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.setShowsOriginal(false) }
             }
         }
     }
