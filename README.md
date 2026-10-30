@@ -365,7 +365,6 @@ RAW_SAMPLE_DIR=<ARWのフォルダ> swift test      # α7S III の実ファイ�
 ```
 
 Xcode で開く場合は `Package.swift` をダブルクリックし、スキームで `RawgenzoApp` を選んで実行します。
-開発の決まりごとや、過去にはまった点は [CLAUDE.md](CLAUDE.md) にまとめてあります。
 
 ### 構成
 
