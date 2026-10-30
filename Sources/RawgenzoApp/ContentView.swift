@@ -171,6 +171,14 @@ struct PreviewView: View {
                                 guides: guides)
                         }
                         .padding(24)
+                } else if model.colorPick != nil {
+                    // スポイトを使っている間も「ウインドウに合わせる」に固定し、押した位置の色を拾う
+                    Image(decorative: cg, scale: 1)
+                        .resizable()
+                        .interpolation(.high)
+                        .aspectRatio(contentMode: .fit)
+                        .overlay { ColorPickLayer() }
+                        .padding(24)
                 } else {
                     ZoomableImageView(
                         image: cg,

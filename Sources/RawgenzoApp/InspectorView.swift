@@ -14,6 +14,7 @@ struct InspectorView: View {
                     lensSection(photo)
                     hdrSection(photo)
                     colorSection(photo)
+                    ColorAdjustSection()
                     detailSection(photo)
                     cropSection(photo)
                     lookSection
@@ -203,7 +204,7 @@ struct InspectorView: View {
 
 /// 調整パネルのセクションの ID。折りたたみの状態を config.json に保存するので、値は変えないこと
 enum InspectorSectionID: String, CaseIterable {
-    case basic, lens, hdr, color, detail, crop, look
+    case basic, lens, hdr, color, hsl, detail, crop, look
 }
 
 /// 折りたためるセクション。見出しの行のどこをクリックしても開閉する。
