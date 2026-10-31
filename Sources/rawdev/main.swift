@@ -11,9 +11,10 @@ let usage = """
   rawdev info <ファイル|フォルダ>...   メタデータとカメラ判定結果を表示
   rawdev looks                     使えるルック(〜風フィルター)の一覧
   rawdev params                    数値で調整するパラメータの一覧(範囲・基準値・説明)
-  rawdev mcp <フォルダ> [--log <ファイル>]
+  rawdev mcp [<フォルダ>] [--log <ファイル>]
                                    MCP サーバー(stdio)。MCP クライアント(Claude Code など)から起動して、
-                                   フォルダの写真の現像設定を AI に操作させる。--log は呼び出しごとの記録(JSON Lines)
+                                   フォルダの写真の現像設定を AI に操作させる。フォルダを省くとアプリが最後に開いたフォルダ。
+                                   --log は呼び出しごとの記録(JSON Lines)
   rawdev tilt <ファイル|フォルダ>...       傾きの推定(線と人物を基準に、直す角度)
   rawdev stats <ファイル|フォルダ>... [--json] [--long-edge <px>] [--preview <フォルダ>]
                                    今の設定(サイドカー)で現像した結果の明るさ・白飛び・色の統計
@@ -310,11 +311,21 @@ case "mcp":
         }
         k += 1
     }
-    guard let folderPath else { fail("写真のフォルダを指定してください 例: rawdev mcp ~/Pictures/trip") }
-    let folder = URL(fileURLWithPath: (folderPath as NSString).expandingTildeInPath, isDirectory: true)
-    var isDir: ObjCBool = false
-    guard FileManager.default.fileExists(atPath: folder.path, isDirectory: &isDir), isDir.boolValue else {
-        fail("フォルダが見つかりません: \(folder.path)")
+    func isDirectory(_ url: URL) -> Bool {
+        var isDir: ObjCBool = false
+        return FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir) && isDir.boolValue
+    }
+    let folder: URL
+    if let folderPath {
+        folder = URL(fileURLWithPath: (folderPath as NSString).expandingTildeInPath, isDirectory: true)
+        guard isDirectory(folder) else { fail("フォルダが見つかりません: \(folder.path)") }
+    } else {
+        // 省いたときは、アプリが最後に開いたフォルダ(無ければピクチャ、それも無ければホーム)
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        let candidates = [SharedConfig.load().lastFolder.map { URL(fileURLWithPath: $0, isDirectory: true) },
+                          home.appendingPathComponent("Pictures", isDirectory: true)].compactMap { $0 }
+        folder = candidates.first(where: isDirectory) ?? home
+        logError("作業フォルダ: \(folder.path)")
     }
     var logHandle: FileHandle?
     if let logURL {

@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import RAWCore
 
 @main
 struct RawgenzoApp: App {
@@ -69,6 +70,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
+        // .app に同梱した rawdev を、AI のセッション用の ~/.Rawgenzo/.mcp.json に登録する(開発用の swift run では作らない)
+        if Bundle.main.bundleURL.pathExtension == "app", let exe = Bundle.main.executableURL {
+            try? MCPConfigFile.ensure(rawdev: exe.deletingLastPathComponent().appendingPathComponent("rawdev"))
+        }
     }
 
     func applicationWillTerminate(_ notification: Notification) {

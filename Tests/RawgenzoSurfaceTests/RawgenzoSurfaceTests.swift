@@ -50,7 +50,9 @@ final class RawgenzoToolsSampleTests: XCTestCase {
 
     override func setUpWithError() throws {
         guard let dir = ProcessInfo.processInfo.environment["RAW_SAMPLE_DIR"] else { throw XCTSkip("RAW_SAMPLE_DIR が未設定") }
-        let samples = try RAWEngine().listCandidates(in: URL(fileURLWithPath: (dir as NSString).expandingTildeInPath))
+        // 値を確かめている写真(DSC03356。露出補正 +0.3、真ん中に花)を先に使う。サンプルを足して名前順の先頭が変わっても同じ写真で試す
+        let all = try RAWEngine().listCandidates(in: URL(fileURLWithPath: (dir as NSString).expandingTildeInPath))
+        let samples = all.filter { $0.lastPathComponent == "DSC03356.ARW" } + all.filter { $0.lastPathComponent != "DSC03356.ARW" }
         guard samples.count >= 2 else { throw XCTSkip("サンプルが 2 枚以上必要") }
         folder = FileManager.default.temporaryDirectory.appendingPathComponent("rawgenzo-surface-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
@@ -80,8 +82,9 @@ final class RawgenzoToolsSampleTests: XCTestCase {
     func testListAndGetPhoto() throws {
         let list = try json(surface.call("list_photos", as: ai))
         XCTAssertEqual(list["total"], 2)
-        XCTAssertEqual(list["photos"]?.arrayValue?.first?["photo"], .string(id))
-        XCTAssertEqual(list["photos"]?.arrayValue?.first?["edited"], false)
+        let listed = list["photos"]?.arrayValue?.first { $0["photo"] == .string(id) }
+        XCTAssertNotNil(listed)
+        XCTAssertEqual(listed?["edited"], false)
         XCTAssertEqual(try json(surface.call("list_photos", arguments: ["iso_min": 10_000_000], as: ai))["total"], 0)
 
         let state = try json(surface.call("get_photo", arguments: ["photo": .string(id)], as: ai))

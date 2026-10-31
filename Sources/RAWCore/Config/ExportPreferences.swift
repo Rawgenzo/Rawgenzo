@@ -111,14 +111,17 @@ public struct ExportPreferences: Codable, Equatable, Sendable {
 /// CLIなど、アプリ以外から config.json の共有部分だけを読むための型
 public struct SharedConfig: Decodable {
     public var export = ExportPreferences()
+    /// アプリが最後に開いたフォルダ(rawdev mcp でフォルダを省いたときに使う)
+    public var lastFolder: String?
 
     public init() {}
 
-    private enum CodingKeys: String, CodingKey { case export }
+    private enum CodingKeys: String, CodingKey { case export, lastFolder }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         export = try c.decodeIfPresent(ExportPreferences.self, forKey: .export) ?? ExportPreferences()
+        lastFolder = try? c.decodeIfPresent(String.self, forKey: .lastFolder)
     }
 
     /// ファイルが無い・読めないときは既定値

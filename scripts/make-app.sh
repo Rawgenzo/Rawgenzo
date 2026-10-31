@@ -19,6 +19,7 @@ BUILD_NUMBER="$(git rev-list --count HEAD 2>/dev/null || echo 1)"
 
 echo "▶ リリースビルド"
 swift build -c release --arch arm64 --product "$PRODUCT"
+swift build -c release --arch arm64 --product rawdev
 BIN_DIR="$(swift build -c release --arch arm64 --show-bin-path)"
 
 APP="$ROOT/build/$APP_NAME.app"
@@ -26,6 +27,8 @@ echo "▶ $APP を組み立て"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN_DIR/$PRODUCT" "$APP/Contents/MacOS/$APP_NAME"
+# CLI と AI 用の MCP サーバー。アプリが ~/.Rawgenzo/.mcp.json にこのパスを登録する
+cp "$BIN_DIR/rawdev" "$APP/Contents/MacOS/rawdev"
 printf "APPL????" > "$APP/Contents/PkgInfo"
 
 ICON_KEY=""

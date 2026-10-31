@@ -56,6 +56,8 @@ cd Rawgenzo
 
 リリースビルドして `Rawgenzo.app` を作り、自分の Mac 用の署名(アドホック署名)をして `/Applications` に入れます。
 `--install` を付けなければ `build/Rawgenzo.app` を作るだけです。
+コマンドラインツール `rawdev`(AI 用の MCP サーバーを兼ねる)もアプリの中(`Rawgenzo.app/Contents/MacOS/rawdev`)に入るので、
+インストールした後はクローンしたリポジトリを消してかまいません。
 
 ビルドせずに試すなら:
 
@@ -92,12 +94,17 @@ swift run rawdev                         # オプションの一覧
 `--save` を付けると、その設定を写真のサイドカーに保存します。
 露出や彩度などの数値はアプリのスライダーと同じ範囲で受け付け、範囲の外は端の値に丸めます(`rawdev params` で確認できます)。
 
-`swift build -c release` でビルドした `.build/release/rawdev` を PATH の通った場所に置けば、`rawdev` だけで使えます。
+インストールしたアプリには `rawdev` が入っています。PATH の通った場所にリンクを置けば、`rawdev` だけで使えます
+(上の例の `swift run rawdev` を `rawdev` に読み替えてください):
+
+```sh
+ln -s /Applications/Rawgenzo.app/Contents/MacOS/rawdev /usr/local/bin/rawdev
+```
 
 ## AI に現像を任せる(MCP サーバー・試作)
 
-`rawdev mcp <フォルダ>` は、写真の現像設定を AI に操作させる MCP サーバーです。渡したフォルダが既定の作業フォルダになり、
-ほかのフォルダの写真も絶対パスで指せます(アプリで別のフォルダの写真を開いていても「この写真」で頼めます)。
+`rawdev mcp` は、写真の現像設定を AI に操作させる MCP サーバーです。アプリが最後に開いたフォルダが既定の作業フォルダになり
+(`rawdev mcp <フォルダ>` で指定もできます)、ほかのフォルダの写真も絶対パスで指せます(アプリで別のフォルダの写真を開いていても「この写真」で頼めます)。
 Claude Code や Claude Desktop などの MCP クライアントに登録すると、AI が写真の一覧・撮影情報・現像結果の統計・縮小画像や、
 アプリで今開いている写真(アプリが受け付けているとき。「この写真の白飛びを抑えて」のように頼めます)を見て、
 現像設定を変えられるようになります。たとえば「ISO 6400 以上の写真は輝度ノイズ除去を 0.5 に」「白飛びを抑えて」
@@ -118,20 +125,39 @@ Claude Code や Claude Desktop などの MCP クライアントに登録する�
   アプリで人が変えた写真は、AI が取り消そうとしても取り消しません(人の変更を消さないため)
 - この設定がオフのまま、アプリで同じ写真を開いていると、アプリの自動保存が AI の変更を上書きすることがあります
 
-Claude Code に登録する例(プロジェクトの `.mcp.json`):
+### Claude Code で使う
+
+アプリを起動すると、`~/.Rawgenzo/.mcp.json` に、アプリに入っている `rawdev` が MCP サーバーとして登録されます。
+**`~/.Rawgenzo` を作業ディレクトリにして Claude Code を開けば**、そのまま Rawgenzo に頼めます:
+
+```sh
+cd ~/.Rawgenzo
+claude
+```
+
+- 最初に開いたときは、この MCP サーバーを使ってよいかの確認が出ます
+- Claude Code が自由に読み書きできるのは作業ディレクトリの中だけです。写真のフォルダは外にあるので、AI は Rawgenzo の道具を通して編集します
+- `~/.Rawgenzo` は名前が「.」で始まる隠しフォルダです。Finder やフォルダを選ぶ画面で表示するには ⌘⇧. を押します
+- 登録先は、最後に起動した Rawgenzo.app の中の `rawdev` になります(アプリを別の場所に移しても、次に起動したときに書き直されます)。
+  `.mcp.json` を自分で書き換えて、アプリの外の `rawdev` を指すようにした場合は、アプリは触りません
+
+`.mcp.json` の中身は次のようになります。`args` に `"--log", "<ファイル>"` を足すと、道具の呼び出しごとに時間と AI に渡したデータの量を記録します。
 
 ```json
 {
   "mcpServers": {
     "rawgenzo": {
-      "command": "/path/to/rawdev",
-      "args": ["mcp", "/path/to/photos", "--log", "/path/to/photos/mcp-log.jsonl"]
+      "args": ["mcp"],
+      "command": "/Applications/Rawgenzo.app/Contents/MacOS/rawdev"
     }
   }
 }
 ```
 
-`--log` を付けると、道具の呼び出しごとに時間と AI に渡したデータの量を記録します。
+### ほかの MCP クライアントで使う
+
+Claude Desktop などでは、それぞれの設定ファイルに同じ形で登録します。`command` は `/Applications/Rawgenzo.app/Contents/MacOS/rawdev`、
+`args` は `["mcp"]` です。
 仕組み(プロセスと通信の向き)は [docs/ai-mcp-architecture.md](docs/ai-mcp-architecture.md) にまとめています。
 
 ## 設定ファイル

@@ -11,8 +11,16 @@
 | ユーザ | 人 | AI に頼む。質問に答える。アプリの画面を見て、自分でもスライダーを動かす |
 | AI | Claude(Anthropic の API の上で動く。クラウド) | 頼まれたことを、道具の呼び出しに分けて考える。Mac には直接触れない |
 | Claude Code | MCP クライアント(Mac のプロセス) | 会話の画面を持ち、AI と道具(MCP サーバー)を取り次ぐ。AI が求めた道具の呼び出しを実際に行う |
-| rawdev mcp | MCP サーバー(Claude Code の子プロセス) | 道具の呼び出しを、起動中の Rawgenzo アプリに中継するか、自分で処理する(`MCPRouter`) |
+| rawdev mcp | MCP サーバー(Claude Code の子プロセス。実体はアプリに同梱した `Rawgenzo.app/Contents/MacOS/rawdev`) | 道具の呼び出しを、起動中の Rawgenzo アプリに中継するか、自分で処理する(`MCPRouter`) |
 | Rawgenzo.app | アプリ(Mac のプロセス) | 設定「AI からの操作を受け付ける」がオンのとき、ソケットで呼び出しを受け、編集中の写真に反映する |
+
+## 起動のしかた
+
+アプリは起動するたびに `~/.Rawgenzo/.mcp.json` を確かめ、無ければ同梱の rawdev を登録する(`MCPConfigFile`。
+最後に起動した .app の rawdev に向け直す。.app の外の存在するファイルを指していれば、人が書き換えたものとして触らない)。
+ユーザは `~/.Rawgenzo` を作業ディレクトリにして Claude Code を開く。Claude Code がその `.mcp.json` を読み、`rawdev mcp` を子プロセスとして起動する。
+フォルダを渡さないので、rawdev は config.json の `lastFolder`(アプリが最後に開いたフォルダ)を既定の作業フォルダにする。
+作業ディレクトリが写真のフォルダの外にあるので、AI はファイルを直接書き換えず、道具を通して編集する。
 
 ## 全体の配置と通信の向き
 
