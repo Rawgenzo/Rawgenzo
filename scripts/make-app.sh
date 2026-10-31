@@ -9,7 +9,7 @@ set -euo pipefail
 APP_NAME="Rawgenzo"
 PRODUCT="RawgenzoApp"                        # Package.swift の実行ターゲット名
 BUNDLE_ID="io.github.rawgenzo.Rawgenzo"      # 好きな逆ドメイン形式に変えてよい
-VERSION="0.1.0"
+VERSION="0.2.0"                              # 機能を main に入れたら 0.x を1つ上げる。不具合直しだけなら 0.x.y の y
 MIN_MACOS="13.0"
 COPYRIGHT="Copyright © 2026 Yukimitsu IZAWA"
 
