@@ -95,16 +95,16 @@ public struct ExportPreferences: Codable, Equatable, Sendable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         let d = ExportPreferences()
         directoryMode = (try? c.decodeIfPresent(DirectoryMode.self, forKey: .directoryMode)) ?? d.directoryMode   // 未知の値なら既定
-        subfolder = try c.decodeIfPresent(String.self, forKey: .subfolder) ?? d.subfolder
-        fixedDirectory = try c.decodeIfPresent(String.self, forKey: .fixedDirectory)
-        lastDirectory = try c.decodeIfPresent(String.self, forKey: .lastDirectory)
-        showDialog = try c.decodeIfPresent(Bool.self, forKey: .showDialog) ?? d.showDialog
-        fileNameTemplate = try c.decodeIfPresent(String.self, forKey: .fileNameTemplate) ?? d.fileNameTemplate
-        nextSequence = max(0, try c.decodeIfPresent(Int.self, forKey: .nextSequence) ?? d.nextSequence)
+        subfolder = (try? c.decodeIfPresent(String.self, forKey: .subfolder)) ?? d.subfolder
+        fixedDirectory = try? c.decodeIfPresent(String.self, forKey: .fixedDirectory)
+        lastDirectory = try? c.decodeIfPresent(String.self, forKey: .lastDirectory)
+        showDialog = (try? c.decodeIfPresent(Bool.self, forKey: .showDialog)) ?? d.showDialog
+        fileNameTemplate = (try? c.decodeIfPresent(String.self, forKey: .fileNameTemplate)) ?? d.fileNameTemplate
+        nextSequence = max(0, (try? c.decodeIfPresent(Int.self, forKey: .nextSequence)) ?? d.nextSequence)
         conflictPolicy = (try? c.decodeIfPresent(ConflictPolicy.self, forKey: .conflictPolicy)) ?? d.conflictPolicy
-        format = try c.decodeIfPresent(String.self, forKey: .format) ?? d.format
-        colorSpace = try c.decodeIfPresent(String.self, forKey: .colorSpace) ?? d.colorSpace
-        quality = min(max(try c.decodeIfPresent(Double.self, forKey: .quality) ?? d.quality, 0.1), 1)
+        format = (try? c.decodeIfPresent(String.self, forKey: .format)) ?? d.format
+        colorSpace = (try? c.decodeIfPresent(String.self, forKey: .colorSpace)) ?? d.colorSpace
+        quality = min(max((try? c.decodeIfPresent(Double.self, forKey: .quality)) ?? d.quality, 0.1), 1)
     }
 }
 
@@ -120,7 +120,7 @@ public struct SharedConfig: Decodable {
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        export = try c.decodeIfPresent(ExportPreferences.self, forKey: .export) ?? ExportPreferences()
+        export = (try? c.decodeIfPresent(ExportPreferences.self, forKey: .export)) ?? ExportPreferences()
         lastFolder = try? c.decodeIfPresent(String.self, forKey: .lastFolder)
     }
 

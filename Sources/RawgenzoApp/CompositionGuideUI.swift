@@ -63,13 +63,13 @@ struct GuideDisplay: Equatable, Codable, RawRepresentable {
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         let d = GuideDisplay()
-        isVisible = try c.decodeIfPresent(Bool.self, forKey: .isVisible) ?? d.isVisible
-        enabled = try c.decodeIfPresent(Set<String>.self, forKey: .enabled) ?? d.enabled
-        flipHorizontal = try c.decodeIfPresent(Bool.self, forKey: .flipHorizontal) ?? d.flipHorizontal
-        flipVertical = try c.decodeIfPresent(Bool.self, forKey: .flipVertical) ?? d.flipVertical
-        flipTriangle = try c.decodeIfPresent(Bool.self, forKey: .flipTriangle) ?? d.flipTriangle
-        opacity = try c.decodeIfPresent(Double.self, forKey: .opacity) ?? d.opacity
-        lineWidth = try c.decodeIfPresent(Double.self, forKey: .lineWidth) ?? d.lineWidth
+        isVisible = (try? c.decodeIfPresent(Bool.self, forKey: .isVisible)) ?? d.isVisible
+        enabled = (try? c.decodeIfPresent(Set<String>.self, forKey: .enabled)) ?? d.enabled
+        flipHorizontal = (try? c.decodeIfPresent(Bool.self, forKey: .flipHorizontal)) ?? d.flipHorizontal
+        flipVertical = (try? c.decodeIfPresent(Bool.self, forKey: .flipVertical)) ?? d.flipVertical
+        flipTriangle = (try? c.decodeIfPresent(Bool.self, forKey: .flipTriangle)) ?? d.flipTriangle
+        opacity = (try? c.decodeIfPresent(Double.self, forKey: .opacity)) ?? d.opacity
+        lineWidth = (try? c.decodeIfPresent(Double.self, forKey: .lineWidth)) ?? d.lineWidth
     }
 
     func encode(to encoder: Encoder) throws {

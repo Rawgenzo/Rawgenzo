@@ -26,9 +26,9 @@ public struct LensCorrectionSettings: Codable, Hashable, Sendable {
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        vignetting = try c.decodeIfPresent(Bool.self, forKey: .vignetting) ?? true
-        distortion = try c.decodeIfPresent(Bool.self, forKey: .distortion) ?? true
-        chromaticAberration = try c.decodeIfPresent(Bool.self, forKey: .chromaticAberration) ?? true
+        vignetting = (try? c.decodeIfPresent(Bool.self, forKey: .vignetting)) ?? true
+        distortion = (try? c.decodeIfPresent(Bool.self, forKey: .distortion)) ?? true
+        chromaticAberration = (try? c.decodeIfPresent(Bool.self, forKey: .chromaticAberration)) ?? true
     }
 }
 

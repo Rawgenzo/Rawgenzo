@@ -30,12 +30,12 @@ struct AppConfig: Codable, Equatable {
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         let d = AppConfig()
-        schemaVersion = try c.decodeIfPresent(Int.self, forKey: .schemaVersion) ?? d.schemaVersion
-        export = try c.decodeIfPresent(ExportPreferences.self, forKey: .export) ?? d.export
-        thumbnails = try c.decodeIfPresent(ThumbnailPreferences.self, forKey: .thumbnails) ?? d.thumbnails
-        guides = try c.decodeIfPresent(GuideDisplay.self, forKey: .guides) ?? d.guides
+        schemaVersion = (try? c.decodeIfPresent(Int.self, forKey: .schemaVersion)) ?? d.schemaVersion
+        export = (try? c.decodeIfPresent(ExportPreferences.self, forKey: .export)) ?? d.export
+        thumbnails = (try? c.decodeIfPresent(ThumbnailPreferences.self, forKey: .thumbnails)) ?? d.thumbnails
+        guides = (try? c.decodeIfPresent(GuideDisplay.self, forKey: .guides)) ?? d.guides
         inspector = (try? c.decodeIfPresent(InspectorPreferences.self, forKey: .inspector)) ?? d.inspector
-        lastFolder = try c.decodeIfPresent(String.self, forKey: .lastFolder)
+        lastFolder = try? c.decodeIfPresent(String.self, forKey: .lastFolder)
         agent = (try? c.decodeIfPresent(AgentPreferences.self, forKey: .agent)) ?? d.agent
         showsFocusPoint = (try? c.decodeIfPresent(Bool.self, forKey: .showsFocusPoint)) ?? d.showsFocusPoint
     }
@@ -92,7 +92,7 @@ struct ThumbnailPreferences: Codable, Equatable {
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        show = try c.decodeIfPresent(Bool.self, forKey: .show) ?? true
+        show = (try? c.decodeIfPresent(Bool.self, forKey: .show)) ?? true
         size = (try? c.decodeIfPresent(ThumbnailSize.self, forKey: .size)) ?? .medium
     }
 }
