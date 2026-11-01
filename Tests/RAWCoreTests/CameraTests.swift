@@ -4,10 +4,17 @@ import CoreImage
 
 final class CameraTests: XCTestCase {
     func testSonyA7S3Matches() {
-        let p = SonyA7S3Profile()
+        let p = SonyProfile(.a7S3)
         XCTAssertTrue(p.matches(RAWMetadata(make: "SONY", model: "ILCE-7SM3")))
         XCTAssertFalse(p.matches(RAWMetadata(make: "SONY", model: "ILCE-7M4")))
         XCTAssertFalse(p.matches(RAWMetadata(make: "Canon", model: "ILCE-7SM3")))
+    }
+
+    /// id はサイドカーに保存されるので、機種どうしで重ならない
+    func testSonyModelIDsAreUnique() {
+        let ids = SonyProfile.models.map(\.id)
+        XCTAssertEqual(Set(ids).count, ids.count)
+        XCTAssertEqual(SonyProfile.Model.a7S3.id, "sony.ilce-7sm3")
     }
 
     func testRegistryPicksProfile() {
@@ -21,7 +28,7 @@ final class CameraTests: XCTestCase {
     /// 高感度の輝度ノイズ除去はデコーダが ISO に応じて決める(DetailTests で実サンプルを確認)ので、
     /// プロファイルでは初期値を入れない
     func testNoiseReductionIsLeftToDecoder() {
-        let p = SonyA7S3Profile()
+        let p = SonyProfile(.a7S3)
         XCTAssertNil(p.initialSettings(for: RAWMetadata(iso: 640)).luminanceNoiseReduction)
         XCTAssertNil(p.initialSettings(for: RAWMetadata(iso: 25600)).luminanceNoiseReduction)
     }

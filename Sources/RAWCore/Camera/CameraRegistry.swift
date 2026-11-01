@@ -10,9 +10,7 @@ public final class CameraRegistry {
 
     /// 既定の対応機種。カメラを増やすときはここに追加する。
     public static func makeDefault() -> CameraRegistry {
-        CameraRegistry(profiles: [
-            SonyA7S3Profile(),
-        ])
+        CameraRegistry(profiles: SonyProfile.all)
     }
 
     public func register(_ profile: CameraProfile) {

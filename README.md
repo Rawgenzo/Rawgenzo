@@ -422,7 +422,7 @@ Xcode で開く場合は `Package.swift` をダブルクリックし、スキー
 ```
 Sources/RAWCore/            現像エンジン (UI非依存)
   Camera/                   対応カメラの定義と登録
-    Sony/SonyA7S3Profile    α7S III の判定・初期値
+    Sony/SonyProfile        SONY の機種一覧と判定
   Decode/                   RAWデコーダ (現在は Core Image の CIRAWFilter)
   Lens/                     レンズ補正
   Pipeline/                 デコード後の処理 (HDRトーン → コントラスト → 色 → クロップ → ルック)

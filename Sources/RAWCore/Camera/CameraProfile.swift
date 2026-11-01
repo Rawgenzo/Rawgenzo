@@ -7,6 +7,9 @@ public protocol CameraProfile {
     /// 安定した識別子。サイドカーに保存されるので変更しないこと。
     var id: String { get }
     var displayName: String { get }
+    /// Core Image の対応機種一覧(CIRAWFilter.supportedCameraModels)での名前。rawdev check で確かめる。
+    /// Core Image 以外のデコーダを使う機種は nil(既定)
+    var coreImageModelName: String? { get }
     /// 小文字の拡張子 (例: "arw")
     var fileExtensions: Set<String> { get }
 
@@ -31,5 +34,6 @@ public protocol CameraProfile {
 public extension CameraProfile {
     func initialSettings(for metadata: RAWMetadata) -> DevelopSettings { DevelopSettings() }
     var extraStages: [DevelopStage] { [] }
+    var coreImageModelName: String? { nil }
     func lensCorrection(url: URL, metadata: RAWMetadata) -> LensCorrectionData? { nil }
 }
