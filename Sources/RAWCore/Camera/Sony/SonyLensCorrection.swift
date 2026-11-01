@@ -50,3 +50,25 @@ public enum SonyLensCorrection {
                                        vignetting: t.vignettingParams, cameraSettings: cameraSettings(t))
     }
 }
+
+extension LensCorrectionData {
+    /// Sony の ARW に記録された補正値から作る。値の意味は docs/sony-lens-correction.md
+    /// (darktable のリバースエンジニアリングによる式。コードは写さず式だけを参考にした)。
+    /// - distortion / vignetting: 先頭が点の数 n、続いて n 個
+    /// - chromatic: 先頭が 2n、続いて R の n 個、B の n 個
+    /// 形が合わなければ nil
+    static func sony(distortion d: [Int], chromatic ca: [Int], vignetting v: [Int],
+                     cameraSettings: LensCorrectionSettings) -> LensCorrectionData? {
+        guard let n = d.first, n >= 2, n <= 16,
+              d.count >= n + 1, v.first == n, v.count >= n + 1,
+              ca.first == 2 * n, ca.count >= 2 * n + 1 else { return nil }
+        let knots = (0..<n).map { (Double($0) + 0.5) / Double(n - 1) }
+        return LensCorrectionData(
+            knots: knots,
+            distortion: (1...n).map { 1 + Double(d[$0]) / 16384 },             // 2^-14
+            chromaticRed: (1...n).map { 1 + Double(ca[$0]) / 2_097_152 },      // 2^-21
+            chromaticBlue: (1...n).map { 1 + Double(ca[n + $0]) / 2_097_152 },
+            vignetting: (1...n).map { pow(2, 0.5 - pow(2, Double(v[$0]) / 8192 - 1)) },   // 2^-13
+            cameraSettings: cameraSettings)
+    }
+}

@@ -123,7 +123,7 @@ Hugin の利用者が集めていた歪曲などの補正データは、lensfun 
   - SubIFD はタグ番号順に並んでいないので、全項目を順に見る
 - カメラ設定の値: 周辺減光 256 = 切 / 257 = オート / 511 = 補正値なし、倍率色収差・歪曲 0 = 切 / 1 = オート /
   255 = 補正値なし(歪曲は 17 = オート(レンズで固定) もある)。exiftool のタグ定義で確認
-- 換算: `LensCorrectionData.sony`。補正の適用: `LensCorrector`(Metal の計算カーネルを CIImageProcessorKernel で組み込む)。
+- 換算: `LensCorrectionData.sony`(`Camera/Sony/SonyLensCorrection.swift`)。補正の適用: `LensCorrector`(Metal の計算カーネルを CIImageProcessorKernel で組み込む)。
   デコード直後(リニアな値)に、歪曲・倍率色収差・周辺減光を 1 回で掛ける
 - 糸巻き型で縁が画像の外を参照しないよう、全体を拡大する(`autoScale`。縁の点を全部調べる)
 - 設定: `DevelopSettings.lens`(nil = 撮影時のカメラ設定に従う)。schemaVersion 2
