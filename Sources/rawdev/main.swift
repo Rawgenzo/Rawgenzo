@@ -91,7 +91,24 @@ func format(_ value: Double?, _ spec: String = "%.1f") -> String {
 }
 
 switch command {
-case "check":
+case "check": runCheck()
+case "info": runInfo()
+case "looks": runLooks()
+case "params": runParams()
+case "tilt": runTilt()
+case "stats": runStats()
+case "mcp": runMCP()
+case "config": runConfig()
+case "name": runName()
+case "develop": runDevelop()
+default:
+    print(usage)
+    exit(1)
+}
+
+// MARK: - コマンド
+
+func runCheck() {
     let models = CoreImageRAWSource.supportedCameraModels
     let hits = models.filter { $0.uppercased().contains("7S III") || $0.uppercased().contains("7SM3") }
     print("Core Imageの対応カメラ数: \(models.count)")
@@ -101,8 +118,9 @@ case "check":
     } else {
         hits.forEach { print("対応: \($0)") }
     }
+}
 
-case "info":
+func runInfo() {
     let urls = expand(arguments)
     if urls.isEmpty { fail("RAWファイルが見つかりません") }
     for url in urls {
@@ -153,14 +171,16 @@ case "info":
             print("  エラー: \(error)")
         }
     }
+}
 
-case "looks":
+func runLooks() {
     for look in engine.looks.all {
         print("\(look.id)\t\(look.displayName)" + (look.summary.map { "\t\($0)" } ?? ""))
     }
     print("\n.cube ファイルは次のフォルダに置くと追加されます:\n  \(LookRegistry.userLooksDirectory.path)")
+}
 
-case "params":
+func runParams() {
     for group in ParameterGroup.allCases {
         print("■ \(group.label)")
         for p in ParameterCatalog.parameters(in: group) {
@@ -175,8 +195,9 @@ case "params":
             print("    \(p.summary)")
         }
     }
+}
 
-case "tilt":
+func runTilt() {
     // --preview <フォルダ>: 候補の線に番号を描いた JPEG を書き出す(AI に見せる画像と同じもの)
     var tiltPreview: URL?
     var tiltPaths: [String] = []
@@ -219,8 +240,9 @@ case "tilt":
             FileHandle.standardError.write("\(url.lastPathComponent): \(error)\n".data(using: .utf8)!)
         }
     }
+}
 
-case "stats":
+func runStats() {
     var paths: [String] = []
     var asJSON = false
     var longEdge = ImageStats.defaultLongEdge
@@ -293,8 +315,9 @@ case "stats":
             FileHandle.standardError.write("✗ \(url.lastPathComponent): \(error)\n".data(using: .utf8)!)
         }
     }
+}
 
-case "mcp":
+func runMCP() {
     // 標準出力は MCP のメッセージ専用。ここでは print を使わない(説明・エラーは標準エラーへ)
     func logError(_ s: String) { FileHandle.standardError.write(Data((s + "\n").utf8)) }
     var folderPath: String?
@@ -365,8 +388,9 @@ case "mcp":
     router.onSwitch = { logError("[rawgenzo] \($0)") }
     logError("[rawgenzo] MCP サーバーを開始: \(folder.path)(\((try? engine.listCandidates(in: folder).count) ?? 0) 枚)")
     router.run()
+}
 
-case "config":
+func runConfig() {
     let path = RawgenzoPaths.configFile.path
     let exists = FileManager.default.fileExists(atPath: path)
     let e = SharedConfig.load().export
@@ -377,8 +401,9 @@ case "config":
     print("  ファイル名: \(e.fileNameTemplate)")
     print("  形式: \(e.format)  色空間: \(e.colorSpace)  画質: \(Int(e.quality * 100))")
     print("  同名ファイル: \(e.conflictPolicy.label)")
+}
 
-case "name":
+func runName() {
     guard let pattern = arguments.first else { fail("テンプレートを指定してください 例: rawdev name \"{date}_{name}\" RAWsample") }
     let t = FileNameTemplate(pattern)
     if let error = t.validate() { fail("テンプレートの誤り: \(error)") }
@@ -391,8 +416,9 @@ case "name":
         let name = (try? t.render(FileNameTemplate.Context(sourceURL: url, metadata: m, sequence: i + 1))) ?? "?"
         print("\(url.lastPathComponent) → \(name)")
     }
+}
 
-case "develop":
+func runDevelop() {
     var paths: [String] = []
     let shared = SharedConfig.load().export
     var outDir: URL?
@@ -539,8 +565,4 @@ case "develop":
             print("✗ \(url.lastPathComponent): \(error)")
         }
     }
-
-default:
-    print(usage)
-    exit(1)
 }
