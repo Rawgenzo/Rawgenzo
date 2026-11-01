@@ -81,8 +81,8 @@ public struct ExposureSolver {
         }
         func with(exposure e: Double? = nil, highlights h: Double? = nil, _ base: DevelopSettings) -> DevelopSettings {
             var s = base
-            if let e { s.exposure = (e * 1000).rounded() / 1000 }
-            if let h { s.hdr.highlights = (h * 1000).rounded() / 1000 }
+            if let e { s.exposure = e.rounded(toPlaces: 3) }
+            if let h { s.hdr.highlights = h.rounded(toPlaces: 3) }
             return s
         }
 

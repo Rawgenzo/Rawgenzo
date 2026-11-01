@@ -112,27 +112,24 @@ public struct ImageStats: Codable, Equatable, Sendable {
             (0..<g).map { col in
                 let k = row * g + col
                 let c = Double(max(cellCount[k], 1))
-                return cellSum[k].map { round3($0 / c) }
+                return cellSum[k].map { ($0 / c).rounded(toPlaces: 3) }
             }
         }
         return ImageStats(
             width: w, height: h,
-            meanLuminance: round3(sumY / total),
-            medianLuminance: round3(percentile(0.5)),
-            p01Luminance: round3(percentile(0.01)),
-            p99Luminance: round3(percentile(0.99)),
-            highlightClipping: round4(Double(hi) / total),
-            channelClipping: channelHi.map { round4(Double($0) / total) },
-            shadowClipping: round4(Double(lo) / total),
-            meanRGB: [sumR, sumG, sumB].map { round3($0 / total) },
-            histogram: hist.map { round4(Double($0) / total) },
-            rgbHistograms: rgbHist.map { $0.map { round4(Double($0) / total) } },
+            meanLuminance: (sumY / total).rounded(toPlaces: 3),
+            medianLuminance: percentile(0.5).rounded(toPlaces: 3),
+            p01Luminance: percentile(0.01).rounded(toPlaces: 3),
+            p99Luminance: percentile(0.99).rounded(toPlaces: 3),
+            highlightClipping: (Double(hi) / total).rounded(toPlaces: 4),
+            channelClipping: channelHi.map { (Double($0) / total).rounded(toPlaces: 4) },
+            shadowClipping: (Double(lo) / total).rounded(toPlaces: 4),
+            meanRGB: [sumR, sumG, sumB].map { ($0 / total).rounded(toPlaces: 3) },
+            histogram: hist.map { (Double($0) / total).rounded(toPlaces: 4) },
+            rgbHistograms: rgbHist.map { $0.map { (Double($0) / total).rounded(toPlaces: 4) } },
             grid: grid)
     }
 
-    // AI に渡す JSON を短くするため、意味のない桁は落とす
-    private static func round3(_ v: Double) -> Double { (v * 1000).rounded() / 1000 }
-    private static func round4(_ v: Double) -> Double { (v * 10000).rounded() / 10000 }
 }
 
 extension DevelopPipeline {

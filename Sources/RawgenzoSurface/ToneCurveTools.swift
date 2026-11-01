@@ -9,10 +9,10 @@ extension RawgenzoTools {
         guard let c, !c.isEmpty else { return .null }
         var o: [String: JSONValue] = [:]
         for channel in ToneCurveChannel.allCases where !ToneCurveSettings.isDefault(c[channel]) {
-            o[channel.rawValue] = .array(c[channel].map { [.number(round1($0.x * 255)), .number(round1($0.y * 255))] })
+            o[channel.rawValue] = .array(c[channel].map { [.number(($0.x * 255).rounded(toPlaces: 1)), .number(($0.y * 255).rounded(toPlaces: 1))] })
         }
         if let preset = ToneCurvePreset.matching(c.luma), preset != .linear { o["preset"] = .string(preset.rawValue) }
-        if c.saturationLink != 0 { o["saturation_link"] = .number(round1(c.saturationLink * 100)) }
+        if c.saturationLink != 0 { o["saturation_link"] = .number((c.saturationLink * 100).rounded(toPlaces: 1)) }
         return .object(o)
     }
 

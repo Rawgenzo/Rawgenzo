@@ -465,7 +465,7 @@ public enum RawgenzoTools {
 
     static func lookJSON(_ ws: RawgenzoWorkspace, _ look: LookSelection?) -> JSONValue {
         guard let l = look else { return .null }
-        var o: [String: JSONValue] = ["id": .string(l.id), "strength": .number(round4(l.strength))]
+        var o: [String: JSONValue] = ["id": .string(l.id), "strength": .number(l.strength.rounded(toPlaces: 4))]
         if let name = ws.engine.looks.look(id: l.id)?.displayName { o["name"] = .string(name) }
         return .object(o)
     }
@@ -528,11 +528,7 @@ public enum RawgenzoTools {
             let lookGiven = args.objectValue?.keys.contains("look") == true
             if !lookGiven, strength == nil, delta == nil { return .error("look・strength・strength_delta のどれかを指定してください") }
             if strength != nil, delta != nil { return .error("strength と strength_delta はどちらか一方にしてください") }
-            var ids: [String] = []
-            for raw in args["photos"]!.arrayValue!.compactMap(\.stringValue) {
-                let id = try ws.canonicalID(raw)
-                if !ids.contains(id) { ids.append(id) }
-            }
+            let ids = try uniqueIDs(ws, args["photos"])
             // 先に全部の写真で確かめる(途中で断って半分だけ変わる、を避ける)
             var planned: [(Photo, DevelopSettings, DevelopSettings)] = []
             for id in ids {
@@ -605,11 +601,7 @@ public enum RawgenzoTools {
                 || args["y"]!.doubleValue! + args["height"]!.doubleValue! > 1 + 1e-9 {
                 return .error("枠が画像の外に出ています(x + width と y + height は 1 以下)")
             }
-            var ids: [String] = []
-            for raw in args["photos"]!.arrayValue!.compactMap(\.stringValue) {
-                let id = try ws.canonicalID(raw)
-                if !ids.contains(id) { ids.append(id) }
-            }
+            let ids = try uniqueIDs(ws, args["photos"])
 
             var results: [JSONValue] = []
             for id in ids {
@@ -700,18 +692,18 @@ public enum RawgenzoTools {
             let photo = try ws.photo(args["photo"]!.stringValue!)
             let report = try TiltEstimator.estimate(photo, settings: photo.settings, pipeline: ws.engine.pipeline)
             let subjects = TiltEstimator.subjectIDs(report.subjects)
-            func point(_ p: CGPoint) -> JSONValue { [.number(round4(Double(p.x))), .number(round4(Double(p.y)))] }
-            func deg(_ v: Double) -> JSONValue { .number((v * 100).rounded() / 100) }
+            func point(_ p: CGPoint) -> JSONValue { [.number(Double(p.x).rounded(toPlaces: 4)), .number(Double(p.y).rounded(toPlaces: 4))] }
+            func deg(_ v: Double) -> JSONValue { .number(v.rounded(toPlaces: 2)) }
             var o: [String: JSONValue] = [
                 "photo": .string(ws.id(for: photo.url)),
                 "current_angle": deg(photo.settings.crop?.angle ?? 0),
                 "segments": .array(report.segments.map {
                     ["id": .number(Double($0.id)), "axis": .string($0.axis.rawValue), "angle": deg($0.angle),
-                     "length": .number(round4($0.length)), "from": point($0.from), "to": point($0.to)]
+                     "length": .number($0.length.rounded(toPlaces: 4)), "from": point($0.from), "to": point($0.to)]
                 }),
                 "subjects": .array(subjects.map { id, m in
                     ["id": .string(id), "kind": .string(m.kind.rawValue), "angle": deg(m.angle), "center": point(m.center),
-                     "confidence": .number((m.confidence * 100).rounded() / 100)]
+                     "confidence": .number(m.confidence.rounded(toPlaces: 2))]
                 }),
             ]
             var notes: [String] = []
@@ -760,9 +752,9 @@ public enum RawgenzoTools {
 
     static func cropJSON(_ crop: CropSettings?) -> JSONValue {
         guard let c = crop else { return .null }
-        return ["x": .number(round4(c.x)), "y": .number(round4(c.y)),
-                "width": .number(round4(c.width)), "height": .number(round4(c.height)),
-                "angle": .number(round4(c.angle)), "aspect": .string(c.aspect.rawValue)]
+        return ["x": .number(c.x.rounded(toPlaces: 4)), "y": .number(c.y.rounded(toPlaces: 4)),
+                "width": .number(c.width.rounded(toPlaces: 4)), "height": .number(c.height.rounded(toPlaces: 4)),
+                "angle": .number(c.angle.rounded(toPlaces: 4)), "aspect": .string(c.aspect.rawValue)]
     }
 
     // MARK: 目標で指示する
@@ -797,11 +789,7 @@ public enum RawgenzoTools {
             // 「白飛びを抑えて」と頼まれたとき、人はふつう明るさまで変わることを期待しない。
             // 試験では AI によって明るさを保つ目標を付けたり付けなかったりしたので、既定で保つ
             let keepBrightness = mean == nil && median == nil && (args["keep_brightness"]?.boolValue ?? true)
-            var ids: [String] = []
-            for raw in args["photos"]!.arrayValue!.compactMap(\.stringValue) {
-                let id = try ws.canonicalID(raw)
-                if !ids.contains(id) { ids.append(id) }
-            }
+            let ids = try uniqueIDs(ws, args["photos"])
 
             var results: [JSONValue] = []
             for id in ids {
@@ -897,7 +885,7 @@ public enum RawgenzoTools {
         for p in ParameterCatalog.all {
             let from = p.value(a, context: context), to = p.value(b, context: context)
             if from != to || p.storedValue(a) != p.storedValue(b) {
-                diff[p.id] = ["from": .number(round4(from)), "to": .number(round4(to))]
+                diff[p.id] = ["from": .number(from.rounded(toPlaces: 4)), "to": .number(to.rounded(toPlaces: 4))]
             }
         }
         return diff
@@ -931,7 +919,7 @@ public enum RawgenzoTools {
             let from = p.value(settings, context: context)
             if let v = value.doubleValue { p.set(v, in: &settings) } else { p.reset(&settings) }
             let to = p.value(settings, context: context)
-            diff[key] = ["from": .number(round4(from)), "to": .number(round4(to))]
+            diff[key] = ["from": .number(from.rounded(toPlaces: 4)), "to": .number(to.rounded(toPlaces: 4))]
         }
         return diff
     }
@@ -973,8 +961,8 @@ public enum RawgenzoTools {
         if let t = m.exposureTime {
             o["shutter"] = .string(t < 1 ? "1/\(Int((1 / t).rounded()))" : String(format: "%.1f", t))
         }
-        if let v = m.fNumber { o["aperture"] = .number(round4(v)) }
-        if let v = m.focalLength { o["focal_length"] = .number(round4(v)) }
+        if let v = m.fNumber { o["aperture"] = .number(v.rounded(toPlaces: 4)) }
+        if let v = m.focalLength { o["focal_length"] = .number(v.rounded(toPlaces: 4)) }
         if let v = m.lensModel { o["lens"] = .string(v) }
         if let v = m.captureDate { o["captured"] = .string(v) }
         return o
@@ -988,10 +976,10 @@ public enum RawgenzoTools {
         o["camera"] = .string(photo.profile.displayName)
         let size = photo.source.nativeSize
         o["size"] = [.number(Double(Int(size.width))), .number(Double(Int(size.height)))]
-        o["as_shot"] = ["temperature": .number(round4(photo.source.asShot.temperature)),
-                        "tint": .number(round4(photo.source.asShot.tint))]
+        o["as_shot"] = ["temperature": .number(photo.source.asShot.temperature.rounded(toPlaces: 4)),
+                        "tint": .number(photo.source.asShot.tint.rounded(toPlaces: 4))]
         o["adjustments"] = .object(Dictionary(uniqueKeysWithValues: ParameterCatalog.all.map {
-            ($0.id, JSONValue.number(round4($0.value(s, context: context))))
+            ($0.id, JSONValue.number(($0.value(s, context: context)).rounded(toPlaces: 4)))
         }))
         o["follows_baseline"] = .array(ParameterCatalog.all.filter { $0.isOptional && $0.storedValue(s) == nil }
             .map { .string($0.id) })
@@ -999,7 +987,7 @@ public enum RawgenzoTools {
         o["look"] = lookJSON(ws, s.look)
         // 撮影情報の残り(get_photo だけ。list_photos は写真の数だけ長くなるので足さない)。値の無い項目は書かない
         let m = photo.metadata
-        if let v = m.exposureBias { o["exposure_bias"] = .number(round4(v)) }
+        if let v = m.exposureBias { o["exposure_bias"] = .number(v.rounded(toPlaces: 4)) }
         if let v = ExifLabels.exposureProgram(m.exposureProgram) { o["exposure_mode"] = .string(v) }
         if let v = ExifLabels.meteringMode(m.meteringMode) { o["metering"] = .string(v) }
         if let v = ExifLabels.whiteBalance(m.whiteBalance) { o["white_balance_mode"] = .string(v) }
@@ -1009,7 +997,7 @@ public enum RawgenzoTools {
         if let f = photo.metadata.focusPoint,
            let p = FocusPointMapping.displayed(FocusPointMapping.upright(f, orientation: photo.metadata.orientation),
                                                crop: s.crop, imageAspect: photo.imageAspect) {
-            o["focus_point"] = [.number((Double(p.x) * 1000).rounded() / 1000), .number((Double(p.y) * 1000).rounded() / 1000)]
+            o["focus_point"] = [.number(Double(p.x).rounded(toPlaces: 3)), .number(Double(p.y).rounded(toPlaces: 3))]
         }
         o["color_adjust"] = colorAdjustJSON(s.colorAdjust)
         o["tone_curve"] = toneCurveJSON(s.toneCurve)
@@ -1017,6 +1005,4 @@ public enum RawgenzoTools {
         o["hdr_output"] = .bool(s.hdr.extendedOutput)
         return o
     }
-
-    static func round4(_ v: Double) -> Double { (v * 10000).rounded() / 10000 }
 }

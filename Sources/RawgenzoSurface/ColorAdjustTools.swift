@@ -12,8 +12,6 @@ import RAWCore
 extension RawgenzoTools {
     static let bandIDs = ColorBand.allCases.map(\.rawValue)
 
-    static func round1(_ v: Double) -> Double { (v * 10).rounded() / 10 }
-
     /// 結果の JSON は短くする(道具の結果は会話に残り、毎回のトークンになる)。0 の値・空の項目は書かない
     static func colorAdjustJSON(_ c: ColorAdjustSettings?) -> JSONValue {
         guard let c, !c.isNeutral || !c.points.isEmpty else { return .null }
@@ -35,15 +33,15 @@ extension RawgenzoTools {
 
     static func pointJSON(_ i: Int, _ p: ColorPointAdjust) -> JSONValue {
         var o: [String: JSONValue] = [
-            "index": .number(Double(i)), "hue": .number(round1(p.hue)), "chroma": .number(round1(p.chroma)),
-            "lightness": .number(round1(p.lightness)), "hue_width": .number(round1(p.hueWidth)),
-            "chroma_range": [.number(round1(p.chromaMin)), .number(round1(p.chromaMax))],
-            "lightness_range": [.number(round1(p.lightnessMin)), .number(round1(p.lightnessMax))],
-            "softness": .number(round1(p.softness)),
+            "index": .number(Double(i)), "hue": .number(p.hue.rounded(toPlaces: 1)), "chroma": .number(p.chroma.rounded(toPlaces: 1)),
+            "lightness": .number(p.lightness.rounded(toPlaces: 1)), "hue_width": .number(p.hueWidth.rounded(toPlaces: 1)),
+            "chroma_range": [.number(p.chromaMin.rounded(toPlaces: 1)), .number(p.chromaMax.rounded(toPlaces: 1))],
+            "lightness_range": [.number(p.lightnessMin.rounded(toPlaces: 1)), .number(p.lightnessMax.rounded(toPlaces: 1))],
+            "softness": .number(p.softness.rounded(toPlaces: 1)),
         ]
         if !p.name.isEmpty { o["name"] = .string(p.name) }
         if p.add != 0 { o["add_color"] = .number(p.add) }
-        if p.addHue != nil { o["add_hue"] = .number(round1(p.effectiveAddHue)) }
+        if p.addHue != nil { o["add_hue"] = .number(p.effectiveAddHue.rounded(toPlaces: 1)) }
         if p.saturation != 0 { o["saturation"] = .number(p.saturation) }
         if p.hueShift != 0 { o["hue_shift"] = .number(p.hueShift) }
         if p.luminance != 0 { o["luminance"] = .number(p.luminance) }
@@ -52,7 +50,7 @@ extension RawgenzoTools {
 
     /// 色を [色相, 濃さ, 明るさ] の 3 つの数で返す(キーを繰り返さない)
     static func pickedJSON(_ c: ColorSampler.Picked) -> JSONValue {
-        [.number(round1(c.hue)), .number(round1(c.chroma)), .number(round1(c.lightness))]
+        [.number(c.hue.rounded(toPlaces: 1)), .number(c.chroma.rounded(toPlaces: 1)), .number(c.lightness.rounded(toPlaces: 1))]
     }
 
     static func registerColorAdjust(on surface: Surface, workspace ws: RawgenzoWorkspace) {
@@ -157,7 +155,7 @@ extension RawgenzoTools {
             func report(_ fit: ColorPointAdjust.FitResult) {
                 if !fit.unresolved.isEmpty {
                     out["unresolved"] = .array(fit.unresolved.map { ["exclude_at": .number(Double($0.index)),
-                                                                      "weight": .number(round1($0.weight * 100) / 100)] })
+                                                                      "weight": .number(($0.weight * 100).rounded(toPlaces: 1) / 100)] })
                     notes.append("変えたくない所のうち \(fit.unresolved.count) か所は、変えたい所と色(色相・淡さ・明るさ)が近すぎて外せなかった。"
                         + "色で選ぶ補正では分けられない(場所で選ぶ補正は無い)ので、人に伝える")
                 }
@@ -215,7 +213,7 @@ extension RawgenzoTools {
                         : [ColorSampler.Picked(ColorSample(hue: point.hue, chroma: point.chroma, lightness: point.lightness))]
                     let r = point.solvedAdd(includes: sample, targetChroma: target)
                     point = r.point
-                    out["target"] = ["achieved": .number(round1(r.achieved)), "met": .bool(r.met)]
+                    out["target"] = ["achieved": .number(r.achieved.rounded(toPlaces: 1)), "met": .bool(r.met)]
                     if !r.met { notes.append(String(format: "目標の濃さに届かなかった(色を足す 100 で %.1f)", r.achieved)) }
                 }
                 // 変えたい所の濃さの前後(平均)。1 か所ずつは返さない。位置を渡さなかったときは、範囲を決めたときに拾った色で測る
@@ -225,12 +223,12 @@ extension RawgenzoTools {
                     let beforeC = measured.map(\.chroma).reduce(0, +) / Double(measured.count)
                     let afterC = measured.map { ColorSampler.Picked(rgb: ColorAdjustMath.apply(s, to: $0.rgb)).chroma }.reduce(0, +)
                         / Double(measured.count)
-                    out["chroma_of_at"] = [.number(round1(beforeC)), .number(round1(afterC))]
+                    out["chroma_of_at"] = [.number(beforeC.rounded(toPlaces: 1)), .number(afterC.rounded(toPlaces: 1))]
                 }
                 c.points[index] = point
                 out["point"] = pointJSON(index, point)
                 // 小数 3 桁に丸める(round1 の後に 1000 で割ると 0.10840000000000001 のような長い数になった)
-                out["coverage"] = .number((try ColorSampler.coverage(of: point, photo, settings: before, pipeline: ws.engine.pipeline) * 1000).rounded() / 1000)
+                out["coverage"] = .number((try ColorSampler.coverage(of: point, photo, settings: before, pipeline: ws.engine.pipeline)).rounded(toPlaces: 3))
                 if point.isNeutral { notes.append("補正の値(add_color・target_chroma など)がまだ無いので、見た目は変わらない") }
             default:
                 return .error("action は add・update・remove・clear のどれかです")
