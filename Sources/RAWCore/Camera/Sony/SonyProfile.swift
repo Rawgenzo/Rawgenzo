@@ -14,7 +14,8 @@ public struct SonyProfile: CameraProfile {
         public let coreImageName: String
     }
 
-    /// 対応機種。機種を足すときは Model に定義を足し、ここに並べる(先に rawdev check で Core Image の対応を確かめる)
+    /// 対応機種。機種を足すときは Model に定義を足してここに並べ、rawdev check で Core Image が読めるか確かめる
+    /// (名前が一覧に無ければ同じメーカーの機種が表示されるので、そこから coreImageName を直す)
     public static let models: [Model] = [.a7S3]
 
     public static var all: [CameraProfile] { models.map(SonyProfile.init) }

@@ -81,13 +81,14 @@ Rawgenzo のコードを書く人と AI エージェント向けの決まり。[
   2. `switch command` に 1 行足す。
   3. `usage` を直す。
 - **SONY の別の機種**
-  1. `rawdev check` で、Core Image がその機種を読めるか確かめる。
-  2. `SonyProfile.Model` に機種の定義を足す。書くものは次の 4 つ。
+  1. `SonyProfile.Model` に機種の定義を足す。書くものは次の 4 つ。
      - EXIF の機種名
      - 表示名
      - id(サイドカーに保存されるので、決めたら変えない)
-     - Core Image での名前
-  3. `SonyProfile.models` に並べる。
+     - Core Image での名前(見当でよい)
+  2. `SonyProfile.models` に並べる。
+  3. `rawdev check` で、Core Image がその機種を読めるか確かめる。
+     名前が一覧に無ければ、Sony の機種がすべて表示される。その中に機種があれば Core Image での名前を直し、無ければ Core Image では読めない。
 
   デコーダ・レンズ補正・フォーカス位置の読み方は、SONY の機種で共通。
 - **SONY 以外のメーカー**
