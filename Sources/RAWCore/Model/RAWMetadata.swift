@@ -29,7 +29,7 @@ public struct RAWMetadata: Equatable, Sendable {
     public var focalLength35mm: Double?
     /// 写真の向き(EXIF の Orientation。1 = そのまま、6 = 90° 時計回り、8 = 90° 反時計回り、3 = 180°)
     public var orientation: Int?
-    /// 撮影時にピントを合わせた位置(カメラの記録の向き = 横長の画像に対する比率、左上原点)。ソニーの MakerNote から読む。無ければ nil
+    /// 撮影時にピントを合わせた位置(カメラの記録の向き = 横長の画像に対する比率、左上原点)。機種の型(CameraProfile.focusPoint)が写真を開くときに読む。無ければ nil
     public var focusPoint: CGPoint?
 
     public init(make: String? = nil, model: String? = nil, iso: Int? = nil,
@@ -71,7 +71,6 @@ public struct RAWMetadata: Equatable, Sendable {
         m.whiteBalance = exif[kCGImagePropertyExifWhiteBalance] as? Int
         m.focalLength35mm = exif[kCGImagePropertyExifFocalLenIn35mmFilm] as? Double
         m.orientation = props[kCGImagePropertyOrientation] as? Int
-        if m.make?.uppercased().hasPrefix("SONY") == true { m.focusPoint = SonyMakerNote.focusPoint(url: url) }
         return m
     }
 

@@ -142,11 +142,11 @@ func runInfo() {
                          ExifLabels.whiteBalance(m.whiteBalance).map { "WB \($0)" },
                          ExifLabels.flash(m.flash).map { "フラッシュ \($0)" }].compactMap { $0 }
             if !modes.isEmpty { print("  " + modes.joined(separator: "  ")) }
-            if let f = m.focusPoint {
+            let photo = try engine.open(url)
+            if let f = photo.metadata.focusPoint {
                 let u = FocusPointMapping.upright(f, orientation: m.orientation)
                 print(String(format: "  フォーカス位置: (%.3f, %.3f)(写真の向きで。左上が原点)", u.x, u.y))
             }
-            let photo = try engine.open(url)
             let size = photo.source.nativeSize
             print("  判定: \(photo.profile.displayName)  サイズ: \(Int(size.width))×\(Int(size.height))")
             print("  撮影時WB: \(Int(photo.source.asShot.temperature))K  tint \(format(photo.source.asShot.tint))")

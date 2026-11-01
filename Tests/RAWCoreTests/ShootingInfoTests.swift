@@ -44,7 +44,7 @@ final class ShootingInfoTests: XCTestCase {
         guard let dir = ProcessInfo.processInfo.environment["RAW_SAMPLE_DIR"] else { throw XCTSkip("RAW_SAMPLE_DIR が未設定") }
         let url = URL(fileURLWithPath: (dir as NSString).expandingTildeInPath).appendingPathComponent("DSC03356.ARW")
         guard FileManager.default.fileExists(atPath: url.path) else { throw XCTSkip("DSC03356.ARW が無い") }
-        let m = try RAWMetadata.read(from: url)
+        let m = try RAWEngine().open(url).metadata
         // ExifTool で確かめた値: FocusLocation 4240 2832 2120 1416(真ん中)、露出補正 +0.3、絞り優先
         let f = try XCTUnwrap(m.focusPoint)
         XCTAssertEqual(f.x, 0.5, accuracy: 1e-3); XCTAssertEqual(f.y, 0.5, accuracy: 1e-3)

@@ -51,10 +51,11 @@ public final class RAWEngine {
     /// RAWを開く。対応カメラでなければ RAWError.unsupportedCamera を投げる。
     /// サイドカーがあれば前回の設定を復元し、なければ機種の初期値を使う。
     public func open(_ url: URL) throws -> Photo {
-        let metadata = try RAWMetadata.read(from: url)
+        var metadata = try RAWMetadata.read(from: url)
         guard let profile = registry.profile(for: metadata) else {
             throw RAWError.unsupportedCamera(make: metadata.make, model: metadata.model)
         }
+        metadata.focusPoint = profile.focusPoint(url: url, metadata: metadata)
         let source = try profile.makeSource(url: url, metadata: metadata)
         let settings = sidecars.load(for: url)?.settings ?? profile.initialSettings(for: metadata)
         return Photo(source: source, profile: profile, settings: settings,

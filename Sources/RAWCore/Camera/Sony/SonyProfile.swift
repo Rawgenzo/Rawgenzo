@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 
 /// SONY の機種(ARW)。デコーダ・レンズ補正・フォーカス位置の読み方は機種によらず同じなので、
@@ -43,6 +44,10 @@ public struct SonyProfile: CameraProfile {
     /// ARW に記録されたレンズ補正値(周辺減光・歪曲・倍率色収差)
     public func lensCorrection(url: URL, metadata: RAWMetadata) -> LensCorrectionData? {
         SonyLensCorrection.read(from: url)
+    }
+
+    public func focusPoint(url: URL, metadata: RAWMetadata) -> CGPoint? {
+        SonyMakerNote.focusPoint(url: url)
     }
 
     // 高感度での輝度ノイズ除去の初期値は、デコーダが ISO に応じて決める値を使う(DetailDefaults)。

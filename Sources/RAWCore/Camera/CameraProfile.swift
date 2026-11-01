@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 
 /// 対応カメラ1機種(または1系統)を表す。
@@ -29,6 +30,9 @@ public protocol CameraProfile {
     /// RAW に記録されたレンズ補正データ。無ければ nil(既定は nil)。
     /// 写真を開いたときに一度だけ呼ばれる(RAWSource の約束と同じく、開いた時点で決まる値として持つ)
     func lensCorrection(url: URL, metadata: RAWMetadata) -> LensCorrectionData?
+
+    /// 撮影時にピントを合わせた位置(メーカー独自の欄から読む。RAWMetadata.focusPoint と同じ座標)。無ければ nil(既定は nil)
+    func focusPoint(url: URL, metadata: RAWMetadata) -> CGPoint?
 }
 
 public extension CameraProfile {
@@ -36,4 +40,5 @@ public extension CameraProfile {
     var extraStages: [DevelopStage] { [] }
     var coreImageModelName: String? { nil }
     func lensCorrection(url: URL, metadata: RAWMetadata) -> LensCorrectionData? { nil }
+    func focusPoint(url: URL, metadata: RAWMetadata) -> CGPoint? { nil }
 }
