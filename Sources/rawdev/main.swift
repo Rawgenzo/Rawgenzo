@@ -7,7 +7,7 @@ import RawgenzoSurface
 
 let usage = """
 使い方:
-  rawdev check                     このMacのCore Imageがα7S IIIに対応しているか確認
+  rawdev check                     このMacのCore Imageが対応機種を読めるか確認
   rawdev info <ファイル|フォルダ>...   メタデータとカメラ判定結果を表示
   rawdev looks                     使えるルック(〜風フィルター)の一覧
   rawdev params                    数値で調整するパラメータの一覧(範囲・基準値・説明)
@@ -110,13 +110,20 @@ default:
 
 func runCheck() {
     let models = CoreImageRAWSource.supportedCameraModels
-    let hits = models.filter { $0.uppercased().contains("7S III") || $0.uppercased().contains("7SM3") }
     print("Core Imageの対応カメラ数: \(models.count)")
-    if hits.isEmpty {
-        print("α7S IIIが一覧に見つかりません。名前の表記が違う可能性があるので、Sonyの機種を表示します:")
-        models.filter { $0.uppercased().contains("SONY") }.forEach { print("  \($0)") }
-    } else {
-        hits.forEach { print("対応: \($0)") }
+    for profile in engine.registry.profiles {
+        guard let name = profile.coreImageModelName else {
+            print("\(profile.displayName): Core Image 以外のデコーダを使う")
+            continue
+        }
+        if models.contains(name) {
+            print("対応: \(profile.displayName)(\(name))")
+        } else {
+            // 名前の表記が違うだけかもしれないので、同じメーカーの機種を並べる
+            let maker = name.split(separator: " ").first.map(String.init) ?? name
+            print("\(profile.displayName) が一覧に見つかりません(\(name))。\(maker) の機種を表示します:")
+            models.filter { $0.hasPrefix(maker) }.forEach { print("  \($0)") }
+        }
     }
 }
 

@@ -6,8 +6,12 @@ import RAWCore
 /// Rawgenzo の領域定義: 写真・現像設定を、操作面(OperationSurface)の道具として公開する。
 /// 道具の説明・入力の形は ParameterCatalog から作るので、スライダーの範囲や注意書きと食い違わない
 public enum RawgenzoTools {
-    public static let instructions = """
-        Rawgenzo は SONY α7S III の RAW(ARW)を現像するソフトです。編集は非破壊で、元の RAW は書き換えず、
+    /// AI への説明。対応機種は登録された機種から作る(機種を足したときに書き直さなくて済むように)
+    public static func instructions(cameras registry: CameraRegistry) -> String {
+        let names = registry.profiles.map(\.displayName).joined(separator: "・")
+        let extensions = registry.supportedExtensions.sorted().map { $0.uppercased() }.joined(separator: "・")
+        return """
+        Rawgenzo は \(names) の RAW(\(extensions))を現像するソフトです。編集は非破壊で、元の RAW は書き換えず、
         設定は写真ごとのサイドカー(<RAW>.rawgenzo.json)に保存されます。adjust の変更は undo で取り消せます。
 
         進め方の目安:
@@ -32,10 +36,11 @@ public enum RawgenzoTools {
           縮小したプレビューや統計には表れない
         統計の値はすべて出力の sRGB(見た目に近い値)で 0〜1。
         """
+    }
 
     /// 道具を登録した操作面を作る
     public static func makeSurface(workspace: RawgenzoWorkspace, version: String = "0.1") -> Surface {
-        let surface = Surface(name: "rawgenzo", version: version, instructions: instructions)
+        let surface = Surface(name: "rawgenzo", version: version, instructions: instructions(cameras: workspace.engine.registry))
         register(on: surface, workspace: workspace)
         registerSolvers(on: surface, workspace: workspace)
         surface.registerStandardTools()

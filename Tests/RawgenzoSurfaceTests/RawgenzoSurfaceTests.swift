@@ -17,6 +17,23 @@ final class RawgenzoToolsSchemaTests: XCTestCase {
         }
     }
 
+    /// AI への説明の対応機種は、登録された機種から作る(機種を足しても書き直さなくて済む)
+    func testInstructionsListRegisteredCameras() {
+        struct OtherCamera: CameraProfile {
+            let id = "other.x1"
+            let displayName = "OTHER X1"
+            let fileExtensions: Set<String> = ["orf"]
+            func matches(_ metadata: RAWMetadata) -> Bool { false }
+            func makeSource(url: URL, metadata: RAWMetadata) throws -> RAWSource {
+                throw RAWError.unsupportedCamera(make: nil, model: nil)
+            }
+        }
+        XCTAssertTrue(RawgenzoTools.instructions(cameras: .makeDefault())
+            .hasPrefix("Rawgenzo は SONY α7S III の RAW(ARW)を現像するソフトです。"))
+        let two = RawgenzoTools.instructions(cameras: CameraRegistry(profiles: SonyProfile.all + [OtherCamera()]))
+        XCTAssertTrue(two.hasPrefix("Rawgenzo は SONY α7S III・OTHER X1 の RAW(ARW・ORF)を現像するソフトです。"))
+    }
+
     func testToolsAreRegisteredInStableOrder() {
         let ws = RawgenzoWorkspace(folder: FileManager.default.temporaryDirectory)
         let surface = RawgenzoTools.makeSurface(workspace: ws)
