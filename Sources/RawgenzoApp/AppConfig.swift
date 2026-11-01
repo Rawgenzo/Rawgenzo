@@ -30,14 +30,14 @@ struct AppConfig: Codable, Equatable {
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         let d = AppConfig()
-        schemaVersion = (try? c.decodeIfPresent(Int.self, forKey: .schemaVersion)) ?? d.schemaVersion
-        export = (try? c.decodeIfPresent(ExportPreferences.self, forKey: .export)) ?? d.export
-        thumbnails = (try? c.decodeIfPresent(ThumbnailPreferences.self, forKey: .thumbnails)) ?? d.thumbnails
-        guides = (try? c.decodeIfPresent(GuideDisplay.self, forKey: .guides)) ?? d.guides
-        inspector = (try? c.decodeIfPresent(InspectorPreferences.self, forKey: .inspector)) ?? d.inspector
-        lastFolder = try? c.decodeIfPresent(String.self, forKey: .lastFolder)
-        agent = (try? c.decodeIfPresent(AgentPreferences.self, forKey: .agent)) ?? d.agent
-        showsFocusPoint = (try? c.decodeIfPresent(Bool.self, forKey: .showsFocusPoint)) ?? d.showsFocusPoint
+        schemaVersion = c.tolerant(.schemaVersion, default: d.schemaVersion)
+        export = c.tolerant(.export, default: d.export)
+        thumbnails = c.tolerant(.thumbnails, default: d.thumbnails)
+        guides = c.tolerant(.guides, default: d.guides)
+        inspector = c.tolerant(.inspector, default: d.inspector)
+        lastFolder = c.tolerant(.lastFolder)
+        agent = c.tolerant(.agent, default: d.agent)
+        showsFocusPoint = c.tolerant(.showsFocusPoint, default: d.showsFocusPoint)
     }
 }
 
@@ -52,7 +52,7 @@ struct AgentPreferences: Codable, Equatable {
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        enabled = (try? c.decodeIfPresent(Bool.self, forKey: .enabled)) ?? false
+        enabled = c.tolerant(.enabled, default: false)
     }
 }
 
@@ -72,8 +72,8 @@ struct InspectorPreferences: Codable, Equatable {
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        collapsed = (try? c.decodeIfPresent(Set<String>.self, forKey: .collapsed)) ?? []
-        defaultsApplied = (try? c.decodeIfPresent(Set<String>.self, forKey: .defaultsApplied)) ?? []
+        collapsed = c.tolerant(.collapsed, default: [])
+        defaultsApplied = c.tolerant(.defaultsApplied, default: [])
         // まだ初めの状態を当てていないセクション(古い設定ファイル・後から足したセクション)は、一度だけ折りたたむ
         for id in Self.collapsedByDefault.subtracting(defaultsApplied) {
             collapsed.insert(id)
@@ -92,8 +92,8 @@ struct ThumbnailPreferences: Codable, Equatable {
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        show = (try? c.decodeIfPresent(Bool.self, forKey: .show)) ?? true
-        size = (try? c.decodeIfPresent(ThumbnailSize.self, forKey: .size)) ?? .medium
+        show = c.tolerant(.show, default: true)
+        size = c.tolerant(.size, default: .medium)
     }
 }
 

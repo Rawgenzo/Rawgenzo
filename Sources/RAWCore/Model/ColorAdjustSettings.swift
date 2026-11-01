@@ -22,13 +22,13 @@ public struct ColorAdjustSettings: Codable, Equatable, Sendable {
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         // 帯は ID の文字列をキーにした表で保存する。知らない ID は読み飛ばす(後で帯を増やしても古い版で開けるように)
-        let raw = (try? c.decodeIfPresent([String: ColorBandAdjust].self, forKey: .bands)) ?? [:]
+        let raw = c.tolerant(.bands, as: [String: ColorBandAdjust].self, default: [:])
         var bands: [ColorBand: ColorBandAdjust] = [:]
         for (key, value) in raw {
             if let band = ColorBand(rawValue: key) { bands[band] = value }
         }
         self.bands = bands
-        points = (try? c.decodeIfPresent([ColorPointAdjust].self, forKey: .points)) ?? []
+        points = c.tolerant(.points, default: [])
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -94,9 +94,9 @@ public struct ColorBandAdjust: Codable, Equatable, Sendable {
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        hue = (try? c.decodeIfPresent(Double.self, forKey: .hue)) ?? 0
-        saturation = (try? c.decodeIfPresent(Double.self, forKey: .saturation)) ?? 0
-        luminance = (try? c.decodeIfPresent(Double.self, forKey: .luminance)) ?? 0
+        hue = c.tolerant(.hue, default: 0)
+        saturation = c.tolerant(.saturation, default: 0)
+        luminance = c.tolerant(.luminance, default: 0)
     }
 }
 
@@ -175,14 +175,14 @@ public struct ColorPointAdjust: Codable, Equatable, Sendable {
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         let d = ColorPointAdjust(hue: 0, chroma: 0)
-        func value(_ key: CodingKeys, _ fallback: Double) -> Double { (try? c.decodeIfPresent(Double.self, forKey: key)) ?? fallback }
-        name = (try? c.decodeIfPresent(String.self, forKey: .name)) ?? ""
+        func value(_ key: CodingKeys, _ fallback: Double) -> Double { c.tolerant(key, default: fallback) }
+        name = c.tolerant(.name, default: "")
         hue = value(.hue, d.hue); chroma = value(.chroma, d.chroma); hueWidth = value(.hueWidth, d.hueWidth)
         chromaMin = value(.chromaMin, d.chromaMin); chromaMax = value(.chromaMax, d.chromaMax)
         lightness = value(.lightness, d.lightness)
         lightnessMin = value(.lightnessMin, d.lightnessMin); lightnessMax = value(.lightnessMax, d.lightnessMax)
-        addHue = try? c.decodeIfPresent(Double.self, forKey: .addHue)
-        samples = (try? c.decodeIfPresent([ColorSample].self, forKey: .samples)) ?? []
+        addHue = c.tolerant(.addHue)
+        samples = c.tolerant(.samples, default: [])
         softness = value(.softness, d.softness); add = value(.add, d.add); saturation = value(.saturation, d.saturation)
         hueShift = value(.hueShift, d.hueShift); luminance = value(.luminance, d.luminance)
     }
@@ -202,8 +202,8 @@ public struct ColorSample: Codable, Equatable, Sendable {
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        hue = (try? c.decodeIfPresent(Double.self, forKey: .hue)) ?? 0
-        chroma = (try? c.decodeIfPresent(Double.self, forKey: .chroma)) ?? 0
-        lightness = (try? c.decodeIfPresent(Double.self, forKey: .lightness)) ?? 50
+        hue = c.tolerant(.hue, default: 0)
+        chroma = c.tolerant(.chroma, default: 0)
+        lightness = c.tolerant(.lightness, default: 50)
     }
 }

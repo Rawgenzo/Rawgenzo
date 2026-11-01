@@ -120,9 +120,9 @@ public struct ToneCurveSettings: Codable, Equatable, Sendable {
         for channel in ToneCurveChannel.allCases {
             let key = CodingKeys(rawValue: channel.rawValue)!
             // 1 つのチャンネルが壊れていても、ほかは読む
-            if let v = (try? c.decodeIfPresent([CurvePoint].self, forKey: key)) ?? nil { self[channel] = v }
+            if let v = c.tolerant(key, as: [CurvePoint].self) { self[channel] = v }
         }
-        saturationLink = min(max((try? c.decodeIfPresent(Double.self, forKey: .saturationLink)) ?? nil ?? 0, 0), 1)
+        saturationLink = min(max(c.tolerant(.saturationLink, default: 0), 0), 1)
     }
 
     /// 点を足していないチャンネルは書かない(斜めの線の上に足した点は、画像を変えなくても残す)

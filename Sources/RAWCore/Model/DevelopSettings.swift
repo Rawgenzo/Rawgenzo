@@ -63,24 +63,24 @@ public struct DevelopSettings: Codable, Equatable, Sendable {
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         let d = DevelopSettings()
-        schemaVersion = (try? c.decodeIfPresent(Int.self, forKey: .schemaVersion)) ?? d.schemaVersion
-        exposure = (try? c.decodeIfPresent(Double.self, forKey: .exposure)) ?? d.exposure
-        temperature = try? c.decodeIfPresent(Double.self, forKey: .temperature)
-        tint = try? c.decodeIfPresent(Double.self, forKey: .tint)
-        contrast = (try? c.decodeIfPresent(Double.self, forKey: .contrast)) ?? d.contrast
+        schemaVersion = c.tolerant(.schemaVersion, default: d.schemaVersion)
+        exposure = c.tolerant(.exposure, default: d.exposure)
+        temperature = c.tolerant(.temperature)
+        tint = c.tolerant(.tint)
+        contrast = c.tolerant(.contrast, default: d.contrast)
         // 読めない形なら無しにする(トーンカーブが壊れていても、ほかの設定は読めるように)
-        toneCurve = (try? c.decodeIfPresent(ToneCurveSettings.self, forKey: .toneCurve)) ?? nil
-        sharpness = try? c.decodeIfPresent(Double.self, forKey: .sharpness)
-        luminanceNoiseReduction = try? c.decodeIfPresent(Double.self, forKey: .luminanceNoiseReduction)
-        colorNoiseReduction = try? c.decodeIfPresent(Double.self, forKey: .colorNoiseReduction)
-        lens = try? c.decodeIfPresent(LensCorrectionSettings.self, forKey: .lens)
-        hdr = (try? c.decodeIfPresent(HDRSettings.self, forKey: .hdr)) ?? d.hdr
-        saturation = (try? c.decodeIfPresent(Double.self, forKey: .saturation)) ?? d.saturation
-        vibrance = (try? c.decodeIfPresent(Double.self, forKey: .vibrance)) ?? d.vibrance
+        toneCurve = c.tolerant(.toneCurve)
+        sharpness = c.tolerant(.sharpness)
+        luminanceNoiseReduction = c.tolerant(.luminanceNoiseReduction)
+        colorNoiseReduction = c.tolerant(.colorNoiseReduction)
+        lens = c.tolerant(.lens)
+        hdr = c.tolerant(.hdr, default: d.hdr)
+        saturation = c.tolerant(.saturation, default: d.saturation)
+        vibrance = c.tolerant(.vibrance, default: d.vibrance)
         // 読めない形なら無しにする(色別補正が壊れていても、ほかの設定は読めるように)
-        colorAdjust = (try? c.decodeIfPresent(ColorAdjustSettings.self, forKey: .colorAdjust)) ?? nil
-        crop = try? c.decodeIfPresent(CropSettings.self, forKey: .crop)
-        look = try? c.decodeIfPresent(LookSelection.self, forKey: .look)
+        colorAdjust = c.tolerant(.colorAdjust)
+        crop = c.tolerant(.crop)
+        look = c.tolerant(.look)
     }
 }
 
@@ -104,10 +104,10 @@ public struct HDRSettings: Codable, Equatable, Sendable {
     /// 欠けた項目・読めない項目は既定値(項目が 1 つ欠けただけで写真の設定が全部読めなくならないように)
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        strength = (try? c.decodeIfPresent(Double.self, forKey: .strength)) ?? 0
-        highlights = (try? c.decodeIfPresent(Double.self, forKey: .highlights)) ?? 0
-        shadows = (try? c.decodeIfPresent(Double.self, forKey: .shadows)) ?? 0
-        extendedOutput = (try? c.decodeIfPresent(Bool.self, forKey: .extendedOutput)) ?? false
+        strength = c.tolerant(.strength, default: 0)
+        highlights = c.tolerant(.highlights, default: 0)
+        shadows = c.tolerant(.shadows, default: 0)
+        extendedOutput = c.tolerant(.extendedOutput, default: false)
     }
 
     public var isNeutral: Bool { strength == 0 && highlights == 0 && shadows == 0 && !extendedOutput }
@@ -135,12 +135,12 @@ public struct CropSettings: Codable, Equatable, Sendable {
     /// 欠けた項目・読めない項目は既定値(全体・傾きなし・比率は自由)
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        x = (try? c.decodeIfPresent(Double.self, forKey: .x)) ?? 0
-        y = (try? c.decodeIfPresent(Double.self, forKey: .y)) ?? 0
-        width = (try? c.decodeIfPresent(Double.self, forKey: .width)) ?? 1
-        height = (try? c.decodeIfPresent(Double.self, forKey: .height)) ?? 1
-        angle = (try? c.decodeIfPresent(Double.self, forKey: .angle)) ?? 0
-        aspect = (try? c.decodeIfPresent(AspectRatio.self, forKey: .aspect)) ?? .free
+        x = c.tolerant(.x, default: 0)
+        y = c.tolerant(.y, default: 0)
+        width = c.tolerant(.width, default: 1)
+        height = c.tolerant(.height, default: 1)
+        angle = c.tolerant(.angle, default: 0)
+        aspect = c.tolerant(.aspect, default: .free)
     }
 
     public static let full = CropSettings()
@@ -218,7 +218,7 @@ public struct LookSelection: Codable, Equatable, Sendable {
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(String.self, forKey: .id)
-        strength = (try? c.decodeIfPresent(Double.self, forKey: .strength)) ?? 1
+        strength = c.tolerant(.strength, default: 1)
     }
 }
 
