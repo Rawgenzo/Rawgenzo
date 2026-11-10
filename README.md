@@ -39,14 +39,19 @@ Apple Silicon の Mac でネイティブに動く RAW 現像ソフトです。
 
 開発中のソフトです。設定やサイドカーの形式は互換性に気を付けていますが、変わる可能性があります。
 
-- ビルド済みのアプリは配布していません(Developer ID 署名・公証をしていないため)。ソースからビルドしてください
 - アプリでの一括現像はまだできません(CLI ではできます)
 - HDR で書き出す場合も、プレビューは SDR で表示します
 - 強い HDR 風トーンで、明暗差の大きい輪郭にハローが出ることがあります
 - サムネイルは RAW に埋め込まれた JPEG なので、現像結果を反映しません
 - 周辺減光の補正の強さが実際のレンズと合っているかは、まだ確かめていません
 
-## インストール(ソースからビルド)
+## インストール
+
+[Releases](https://github.com/Rawgenzo/Rawgenzo/releases/latest) から `Rawgenzo-<版>.dmg` をダウンロードして開き、
+`Rawgenzo` を `Applications` へドラッグします。Apple の公証を通してあるので、そのまま起動できます。
+コマンドラインツール `rawdev`(AI 用の MCP サーバーを兼ねる)は、アプリの中(`Rawgenzo.app/Contents/MacOS/rawdev`)に入っています。
+
+### ソースからビルドする
 
 ```sh
 git clone https://github.com/Rawgenzo/Rawgenzo.git
