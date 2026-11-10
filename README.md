@@ -78,7 +78,7 @@ swift run RawgenzoApp
 ```
 
 Developer ID Application の証明書と、`notarytool store-credentials` で保存した認証情報が、ログインキーチェーンに要ります。
-コミットしていない変更があると止まります(ビルド番号がコミット数のため)。GitHub Releases への公開は手で行います。
+コミットしていない変更があると止まります(ビルド番号がコミット数のため)。GitHub Releases への公開までの手順は [docs/release.md](docs/release.md) にまとめてあります。
 
 ## 使い方
 
