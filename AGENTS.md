@@ -14,7 +14,7 @@ swift build
 swift test
 RAW_SAMPLE_DIR=RAWsample swift test   # 実サンプルを使うテストも含める(サンプルがあるとき)
 ./scripts/make-app.sh                 # .app を作る(rawdev も同梱)
-./scripts/release.sh --no-notarize   # 配布用に署名した DMG を作る(公証まで行うのは管理者だけ)
+./scripts/release.sh --no-notarize   # 配布用に署名した DMG を作る(管理者だけ。Developer ID の証明書が要る)
 ```
 
 報告の前に、ビルドとテストを通して終了コードを確かめる。
