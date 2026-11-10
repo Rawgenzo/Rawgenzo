@@ -9,10 +9,12 @@
       <stop offset="0" stop-color="#7a5cc7" stop-opacity="0.35"/>
       <stop offset="1" stop-color="#e8743b"/>
     </linearGradient>
+    <marker id="head" viewBox="0 0 10 10" refX="4" refY="5" markerUnits="userSpaceOnUse" markerWidth="26" markerHeight="26" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 Z" fill="#e8743b" stroke="#e8743b" stroke-width="1.2" stroke-linejoin="round"/>
+    </marker>
   </defs>
   <rect width="540" height="380" fill="url(#bg)"/>
-  <!-- アプリから Applications への矢印(アイコンの夕焼けの色) -->
-  <path d="M 222 180 C 250 158, 290 158, 312 172" fill="none" stroke="url(#arrow)" stroke-width="7" stroke-linecap="round"/>
-  <path d="M 300 160 L 322 179 L 294 186 Z" fill="#e8743b" stroke="#e8743b" stroke-width="3" stroke-linejoin="round"/>
+  <!-- アプリから Applications への矢印(アイコンの夕焼けの色)。矢じりは marker で線の終わりの向きに合わせる -->
+  <path d="M 218 182 C 246 152, 286 150, 312 170" fill="none" stroke="url(#arrow)" stroke-width="7" stroke-linecap="round" marker-end="url(#head)"/>
   <text x="270" y="334" text-anchor="middle" font-family="Hiragino Sans, Helvetica Neue" font-size="13" fill="#6e6e73">Rawgenzo を Applications へドラッグしてインストールします</text>
 </svg>
