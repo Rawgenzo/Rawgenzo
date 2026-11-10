@@ -1,0 +1,6 @@
+<!-- DMG をマウントしたときのアイコン(案 B: 外付けドライブの正面にアプリのレンズ)。scripts/make_dmg_art.sh で .icns にする -->
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="512" height="512" viewBox="0 0 1024 1024"><defs><filter id="sh" x="-20%" y="-20%" width="140%" height="150%"><feDropShadow dx="0" dy="18" stdDeviation="22" flood-opacity="0.38"/></filter><clipPath id="lens"><circle cx="512" cy="512" r="320"/></clipPath><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#eef0f4"/><stop offset="1" stop-color="#a9aeb9"/></linearGradient></defs>
+<g filter="url(#sh)"><rect x="62" y="262" width="900" height="520" rx="110" fill="url(#g)"/>
+<rect x="66" y="266" width="892" height="512" rx="106" fill="none" stroke="#fff" stroke-opacity=".7" stroke-width="6"/>
+<g transform="translate(512 522) scale(0.62) translate(-512 -512)"><image href="AppIcon.png" width="1024" height="1024" clip-path="url(#lens)"/></g>
+<circle cx="878" cy="716" r="13" fill="#4fdc78"/></g></svg>

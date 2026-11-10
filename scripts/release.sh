@@ -36,12 +36,7 @@ VERSION="$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$APP/
 DMG="$ROOT/build/$APP_NAME-$VERSION.dmg"
 
 echo "▶ $DMG を作成"
-STAGING="$(mktemp -d)"
-trap 'rm -rf "$STAGING"' EXIT
-ditto "$APP" "$STAGING/$APP_NAME.app"
-ln -s /Applications "$STAGING/Applications"   # 開いた窓でアプリをここへドラッグして入れる
-rm -f "$DMG"
-hdiutil create -volname "$APP_NAME $VERSION" -srcfolder "$STAGING" -fs HFS+ -format UDZO -ov "$DMG" >/dev/null
+scripts/make_dmg.sh "$APP" "$DMG" "$APP_NAME $VERSION"
 codesign --force --timestamp --sign "$SIGN_IDENTITY" "$DMG"
 codesign --verify --verbose=2 "$DMG"
 

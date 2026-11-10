@@ -1,0 +1,18 @@
+<!-- DMG を開いたウインドウの背景(540×380 ポイント)。アイコンの中心は (140, 180) と (400, 180)。scripts/make_dmg_art.sh で 2 倍の TIFF にする -->
+<svg xmlns="http://www.w3.org/2000/svg" width="540" height="380" viewBox="0 0 540 380">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f7f7f9"/>
+      <stop offset="1" stop-color="#e4e5ea"/>
+    </linearGradient>
+    <linearGradient id="arrow" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#7a5cc7" stop-opacity="0.35"/>
+      <stop offset="1" stop-color="#e8743b"/>
+    </linearGradient>
+  </defs>
+  <rect width="540" height="380" fill="url(#bg)"/>
+  <!-- アプリから Applications への矢印(アイコンの夕焼けの色) -->
+  <path d="M 222 180 C 250 158, 290 158, 312 172" fill="none" stroke="url(#arrow)" stroke-width="7" stroke-linecap="round"/>
+  <path d="M 300 160 L 322 179 L 294 186 Z" fill="#e8743b" stroke="#e8743b" stroke-width="3" stroke-linejoin="round"/>
+  <text x="270" y="334" text-anchor="middle" font-family="Hiragino Sans, Helvetica Neue" font-size="13" fill="#6e6e73">Rawgenzo を Applications へドラッグしてインストールします</text>
+</svg>

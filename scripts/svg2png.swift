@@ -5,14 +5,17 @@
 //
 //   swiftc -O -o /tmp/svg2png scripts/svg2png.swift
 //   /tmp/svg2png docs/images/ai-mcp-overview.svg docs/images/ai-mcp-overview.png
+//   /tmp/svg2png --transparent Resources/DMG/volume-icon.svg out.png   # 背景を塗らない(アイコン用)
 //
 // 大きさは SVG の width / height 属性から読む。日本語は macOS のヒラギノで描かれる
 import AppKit
 import WebKit
 
-let args = CommandLine.arguments
+var args = CommandLine.arguments
+let transparent = args.count > 1 && args[1] == "--transparent"
+if transparent { args.remove(at: 1) }
 guard args.count == 3 else {
-    FileHandle.standardError.write("使い方: svg2png <入力.svg> <出力.png>\n".data(using: .utf8)!)
+    FileHandle.standardError.write("使い方: svg2png [--transparent] <入力.svg> <出力.png>\n".data(using: .utf8)!)
     exit(2)
 }
 let input = URL(fileURLWithPath: args[1]).standardizedFileURL
@@ -41,11 +44,13 @@ final class Renderer: NSObject, WKNavigationDelegate {
     let output: URL
     let web: WKWebView
 
-    init(width: Double, height: Double, scale: Double, output: URL) {
+    init(width: Double, height: Double, scale: Double, output: URL, transparent: Bool) {
         self.width = width; self.height = height; self.scale = scale; self.output = output
         web = WKWebView(frame: NSRect(x: 0, y: 0, width: width, height: height))
         super.init()
         web.navigationDelegate = self
+        // WKWebView は既定で白く塗る。公開の API が無いので、AppKit 版が持つ drawsBackground を切る
+        if transparent { web.setValue(false, forKey: "drawsBackground") }
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
@@ -89,7 +94,7 @@ final class Renderer: NSObject, WKNavigationDelegate {
 
 let app = NSApplication.shared
 app.setActivationPolicy(.prohibited)
-let renderer = Renderer(width: width, height: height, scale: scale, output: output)
+let renderer = Renderer(width: width, height: height, scale: scale, output: output, transparent: transparent)
 // SVG ファイルそのものを読ませる(HTML から img で参照すると、ファイルを読む権限が無く表示されない)
 renderer.web.loadFileURL(input, allowingReadAccessTo: input.deletingLastPathComponent())
 DispatchQueue.main.asyncAfter(deadline: .now() + 20) {
