@@ -65,6 +65,16 @@ cd Rawgenzo
 swift run RawgenzoApp
 ```
 
+### 配布用の DMG を作る(管理者向け)
+
+```sh
+./scripts/release.sh                # 署名・公証・staple まで行い、build/Rawgenzo-<版>.dmg を作る
+./scripts/release.sh --no-notarize  # 署名した DMG を作るところまで(Apple には送らない)
+```
+
+Developer ID Application の証明書と、`notarytool store-credentials` で保存した認証情報が、ログインキーチェーンに要ります。
+コミットしていない変更があると止まります(ビルド番号がコミット数のため)。GitHub Releases への公開は手で行います。
+
 ## 使い方
 
 1. 「ファイル」→「フォルダを開く…」(⌘O)で ARW の入ったフォルダを開く
