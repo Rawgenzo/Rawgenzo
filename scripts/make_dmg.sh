@@ -37,10 +37,6 @@ cp "$ART/background.tiff" "$STAGING/.background/background.tiff"
 SIZE_MB=$(( $(du -sm "$STAGING" | cut -f1) + 20 ))
 hdiutil create -volname "$VOLNAME" -srcfolder "$STAGING" -fs HFS+ -format UDRW -size "${SIZE_MB}m" -ov "$WORK/rw.dmg" >/dev/null
 hdiutil attach "$WORK/rw.dmg" -readwrite -noverify -noautoopen -quiet
-# アイコンはマウントした後に置く(-srcfolder に入れておいても DMG に入らなかった)
-cp "$ART/VolumeIcon.icns" "$MOUNT/.VolumeIcon.icns"
-SetFile -c icnC "$MOUNT/.VolumeIcon.icns"
-SetFile -a C "$MOUNT"   # ボリュームに .VolumeIcon.icns を使わせる
 
 osascript <<APPLESCRIPT
 tell application "Finder"
@@ -70,6 +66,11 @@ APPLESCRIPT
 # Finder が .DS_Store を書き終えるのを待つ
 for _ in $(seq 1 20); do [[ -f "$MOUNT/.DS_Store" ]] && break; sleep 0.5; done
 [[ -f "$MOUNT/.DS_Store" ]] || { echo "✗ Finder が .DS_Store を書きませんでした" >&2; exit 1; }
+# アイコンはマウントした後、Finder の設定の後に付ける。
+# -srcfolder に入れても DMG に入らず、Finder の設定より前に印を付けると Finder が消した
+cp "$ART/VolumeIcon.icns" "$MOUNT/.VolumeIcon.icns"
+SetFile -c icnC "$MOUNT/.VolumeIcon.icns"
+SetFile -a C "$MOUNT"   # ボリュームに .VolumeIcon.icns を使わせる
 [[ "$(GetFileInfo -a "$MOUNT")" == *C* ]] || { echo "✗ ボリュームにカスタムアイコンの印が付いていません" >&2; exit 1; }
 [[ -f "$MOUNT/.VolumeIcon.icns" ]] || { echo "✗ .VolumeIcon.icns がありません" >&2; exit 1; }
 sync
