@@ -3,6 +3,9 @@
 #   ./scripts/make-app.sh            → build/Rawgenzo.app を作成
 #   ./scripts/make-app.sh --install  → さらに /Applications にコピー
 #
+# 既定はアドホック署名(この Mac でだけ動く)。SIGN_IDENTITY に署名の ID を渡すと、配布用の署名になる。
+# 配布用の DMG は scripts/release.sh で作る。
+#
 # アイコンを付けたい場合は、1024×1024 の PNG を Resources/AppIcon.png に置く。
 set -euo pipefail
 
@@ -68,9 +71,17 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
-echo "▶ 署名(自分のMac用のアドホック署名)"
-codesign --force --deep --sign - "$APP"
-codesign --verify --verbose "$APP"
+if [[ -n "${SIGN_IDENTITY:-}" ]]; then
+    # 公証には Hardened Runtime とタイムスタンプが要る。--deep は使わず、中の実行ファイルから順に署名する
+    echo "▶ 署名($SIGN_IDENTITY)"
+    codesign --force --options runtime --timestamp --sign "$SIGN_IDENTITY" "$APP/Contents/MacOS/rawdev"
+    codesign --force --options runtime --timestamp --sign "$SIGN_IDENTITY" "$APP"
+    codesign --verify --strict --deep --verbose=2 "$APP"
+else
+    echo "▶ 署名(自分のMac用のアドホック署名)"
+    codesign --force --deep --sign - "$APP"
+    codesign --verify --verbose "$APP"
+fi
 
 if [[ "${1:-}" == "--install" ]]; then
     DEST="/Applications/$APP_NAME.app"
