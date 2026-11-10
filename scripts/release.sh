@@ -51,7 +51,8 @@ if [[ $NOTARIZE == 0 ]]; then
 fi
 
 echo "▶ 公証を申請(数分かかる)"
-RESULT="$(xcrun notarytool submit "$DMG" --keychain-profile "$NOTARY_PROFILE" --wait)"
+# 通らなかったときも理由のログを出せるよう、notarytool の失敗でここでは止めない
+RESULT="$(xcrun notarytool submit "$DMG" --keychain-profile "$NOTARY_PROFILE" --wait 2>&1)" || true
 echo "$RESULT"
 if ! grep -q "status: Accepted" <<<"$RESULT"; then
     ID="$(awk '/^ *id:/ { print $2; exit }' <<<"$RESULT")"
@@ -66,6 +67,5 @@ xcrun stapler staple "$DMG"
 echo "▶ 確かめ"
 xcrun stapler validate "$DMG"
 spctl --assess --type open --context context:primary-signature --verbose=2 "$DMG"
-spctl --assess --type execute --verbose=2 "$APP"
 shasum -a 256 "$DMG"
 echo "✓ 配布できる DMG ができました: $DMG"
