@@ -27,6 +27,9 @@
    ./scripts/release.sh
    ```
    ビルド・署名(Hardened Runtime とタイムスタンプ付き)・DMG の作成と署名・公証・staple・確かめを順に行う。
+   DMG の見た目(開いたウインドウの背景と配置、マウントしたときのアイコン)は `scripts/make_dmg.sh` が Finder に設定させる。
+   画面のある Mac で、ほかに同じ名前の DMG をマウントしていない状態で実行する。初回は「Finder を操作しようとしています」の許可が要る。
+   背景やアイコンの絵は `Resources/DMG/*.svg` が元で、直したら `scripts/make_dmg_art.sh` で画像を作り直してコミットする。
    公証は数分かかる。終わると `build/Rawgenzo-<版>.dmg` と、その SHA-256 が表示される。
    Apple に送らずに署名までを試すときは `--no-notarize` を付ける。
 4. **タグを付けて push する。** タグは DMG を作ったコミットに付ける。
