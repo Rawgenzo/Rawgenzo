@@ -32,12 +32,14 @@ mkdir -p "$STAGING/.background"
 ditto "$APP" "$STAGING/$APP_NAME"
 ln -s /Applications "$STAGING/Applications"
 cp "$ART/background.tiff" "$STAGING/.background/background.tiff"
-cp "$ART/VolumeIcon.icns" "$STAGING/.VolumeIcon.icns"
 
 # 書き込める形で作ってマウントし、Finder に見た目を設定させる。.DS_Store を書く余白を足しておく
 SIZE_MB=$(( $(du -sm "$STAGING" | cut -f1) + 20 ))
 hdiutil create -volname "$VOLNAME" -srcfolder "$STAGING" -fs HFS+ -format UDRW -size "${SIZE_MB}m" -ov "$WORK/rw.dmg" >/dev/null
 hdiutil attach "$WORK/rw.dmg" -readwrite -noverify -noautoopen -quiet
+# アイコンはマウントした後に置く(-srcfolder に入れておいても DMG に入らなかった)
+cp "$ART/VolumeIcon.icns" "$MOUNT/.VolumeIcon.icns"
+SetFile -c icnC "$MOUNT/.VolumeIcon.icns"
 SetFile -a C "$MOUNT"   # ボリュームに .VolumeIcon.icns を使わせる
 
 osascript <<APPLESCRIPT
@@ -68,6 +70,8 @@ APPLESCRIPT
 # Finder が .DS_Store を書き終えるのを待つ
 for _ in $(seq 1 20); do [[ -f "$MOUNT/.DS_Store" ]] && break; sleep 0.5; done
 [[ -f "$MOUNT/.DS_Store" ]] || { echo "✗ Finder が .DS_Store を書きませんでした" >&2; exit 1; }
+[[ "$(GetFileInfo -a "$MOUNT")" == *C* ]] || { echo "✗ ボリュームにカスタムアイコンの印が付いていません" >&2; exit 1; }
+[[ -f "$MOUNT/.VolumeIcon.icns" ]] || { echo "✗ .VolumeIcon.icns がありません" >&2; exit 1; }
 sync
 hdiutil detach "$MOUNT" -quiet
 
