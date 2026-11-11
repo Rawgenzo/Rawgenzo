@@ -1,4 +1,4 @@
-<!-- DMG を開いたウインドウの背景(540×380 ポイント)。アイコンの中心は (140, 180) と (400, 180)。scripts/make_dmg_art.sh で 2 倍の TIFF にする -->
+<!-- DMG を開いたウインドウの背景(540×380 ポイント)。アイコンの中心は (140, 180) と (400, 180)。案内文は Finder のパスバー(下端)に隠れないよう、中心を y = 312 に置く。scripts/make_dmg_art.sh で 2 倍の TIFF にする -->
 <svg xmlns="http://www.w3.org/2000/svg" width="540" height="380" viewBox="0 0 540 380">
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
@@ -16,5 +16,5 @@
   <rect width="540" height="380" fill="url(#bg)"/>
   <!-- アプリから Applications への矢印(アイコンの夕焼けの色)。矢じりは marker で線の終わりの向きに合わせる -->
   <path d="M 218 182 C 246 152, 286 150, 312 170" fill="none" stroke="url(#arrow)" stroke-width="7" stroke-linecap="round" marker-end="url(#head)"/>
-  <text x="270" y="334" text-anchor="middle" font-family="Hiragino Sans, Helvetica Neue" font-size="13" fill="#6e6e73">Rawgenzo を Applications へドラッグしてインストールします</text>
+  <text x="270" y="316.5" text-anchor="middle" font-family="Hiragino Sans, Helvetica Neue" font-size="13" fill="#6e6e73">Rawgenzo を Applications へドラッグしてインストールします</text>
 </svg>
